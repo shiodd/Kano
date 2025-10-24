@@ -2,7 +2,15 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use tauri::{Emitter, Manager, State};
 // reqwest Client is used inline; no extra import required here
+
+// Global state to track running processes
+struct RunningProcesses {
+    processes: Mutex<HashMap<String, u32>>, // path -> process_id
+}
 
 // A simple greeting kept for compatibility
 #[tauri::command]
@@ -10,26 +18,83 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-// Launch an executable by path
+// Launch an executable by path and monitor the process
 #[tauri::command]
-fn launch_exe(path: &str) -> Result<(), String> {
-    let p = PathBuf::from(path);
+async fn launch_exe(path: String, app: tauri::AppHandle, state: State<'_, RunningProcesses>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
     if !p.exists() || !p.is_file() {
         return Err("executable not found".into());
     }
-    #[cfg(target_os = "windows")]
+    
+    // Spawn the process
+    let mut child = std::process::Command::new(&p)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    
+    // Get process ID
+    let pid = child.id();
+    
+    // Store process ID
     {
-        std::process::Command::new(&p)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        let mut processes = state.processes.lock().unwrap();
+        processes.insert(path.clone(), pid);
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new(path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+    
+    // Clone app handle for the async task
+    let app_clone = app.clone();
+    let path_clone = path.clone();
+    
+    // Monitor the process in a separate thread
+    tauri::async_runtime::spawn(async move {
+        // Wait for the process to exit
+        match child.wait() {
+            Ok(_) => {
+                // Remove from tracking
+                {
+                    let state = app_clone.state::<RunningProcesses>();
+                    let mut processes = state.processes.lock().unwrap();
+                    processes.remove(&path_clone);
+                }
+                // Process has exited, emit event to frontend
+                let _ = app_clone.emit("game-exited", path_clone);
+            }
+            Err(e) => {
+                eprintln!("Error waiting for process: {}", e);
+            }
+        }
+    });
+    
+    Ok(())
+}
+
+// Kill a running game process
+#[tauri::command]
+fn kill_game(path: String, state: State<'_, RunningProcesses>) -> Result<(), String> {
+    let processes = state.processes.lock().unwrap();
+    
+    if let Some(&pid) = processes.get(&path) {
+        #[cfg(target_os = "windows")]
+        {
+            // Use taskkill on Windows
+            std::process::Command::new("taskkill")
+                .args(&["/F", "/PID", &pid.to_string()])
+                .output()
+                .map_err(|e| e.to_string())?;
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Use kill on Unix-like systems
+            use std::process::Command;
+            Command::new("kill")
+                .args(&["-9", &pid.to_string()])
+                .output()
+                .map_err(|e| e.to_string())?;
+        }
+        
         Ok(())
+    } else {
+        Err("Process not found".into())
     }
 }
 
@@ -39,6 +104,10 @@ struct GameEntry {
     path: String,
     image: Option<String>,
     subject_id: Option<i64>,
+    #[serde(default)]
+    playtime: i64, // 总游戏时长（秒）
+    #[serde(default)]
+    last_played: Option<String>, // 上次游玩时间 (ISO 8601 格式)
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -202,6 +271,8 @@ fn add_game(path: &str, name: Option<&str>) -> Result<GameEntry, String> {
         path: p.to_string_lossy().to_string(),
         image: None,
         subject_id: None,
+        playtime: 0,
+        last_played: None,
     };
     let mut db = load_games_db();
     // avoid duplicates
@@ -275,6 +346,30 @@ fn update_game_info(path: &str, name: Option<&str>, image: Option<&str>, subject
 }
 
 #[tauri::command]
+fn update_game_playtime(path: &str, additional_seconds: i64, last_played: &str) -> Result<i64, String> {
+    let mut db = load_games_db();
+    let mut found = false;
+    let mut total_playtime = 0i64;
+    
+    for g in db.games.iter_mut() {
+        if g.path == path {
+            g.playtime += additional_seconds;
+            g.last_played = Some(last_played.to_string());
+            total_playtime = g.playtime;
+            found = true;
+            break;
+        }
+    }
+    
+    if found {
+        save_games_db(&db)?;
+        Ok(total_playtime)
+    } else {
+        Err("game not found".into())
+    }
+}
+
+#[tauri::command]
 fn list_games() -> Result<Vec<GameEntry>, String> {
     let db = load_games_db();
     Ok(db.games)
@@ -292,9 +387,13 @@ fn remove_game(path: &str) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(RunningProcesses {
+            processes: Mutex::new(HashMap::new()),
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             launch_exe,
+            kill_game,
             pick_exe,
             pick_folder_and_scan,
             add_game,
@@ -304,6 +403,7 @@ pub fn run() {
             get_bangumi_subject,
             update_game_image,
             update_game_info,
+            update_game_playtime,
             set_access_token,
             get_access_token,
             load_cache,

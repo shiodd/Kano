@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import BangumiTest from './components/BangumiTest.vue';
 
 const greetMsg = ref("");
@@ -108,10 +109,19 @@ async function greet() {
 // Minimal: user selects an exe and we launch it
 const selectedExe = ref("");
 const games = ref([]);
+const runningGames = ref(new Set()); // 追踪正在运行的游戏路径
+const gameStartTimes = ref(new Map()); // 记录游戏启动时间 path -> timestamp
 
 // Multi-select state
 const selectedGames = ref(new Set());
 const isMultiSelectMode = ref(false);
+
+// Menu state
+const showMenu = ref(false);
+
+// Toast state
+const toastMessage = ref('');
+const toastVisible = ref(false);
 
 // Filter state
 const selectedFilter = ref('全部'); // '全部', 'ADV', 'RPG'
@@ -164,6 +174,15 @@ const filteredGames = computed(() => {
 
 function setFilter(filter) {
   selectedFilter.value = filter;
+}
+
+// Toast notification
+function showToast(message) {
+  toastMessage.value = message;
+  toastVisible.value = true;
+  setTimeout(() => {
+    toastVisible.value = false;
+  }, 2000);
 }
 
 function toggleMultiSelect() {
@@ -220,6 +239,7 @@ async function deleteSelectedGames() {
     }
     selectedGames.value.clear();
     await listGames();
+    isMultiSelectMode.value = false; // 自动退出多选模式
   } catch (e) {
     alert('批量删除失败: ' + e);
   }
@@ -246,9 +266,18 @@ onMounted(async () => {
   loadCacheFromFile(); // Load cache first
   listGames();
   loadToken();
+  
+  // Listen for game exit events
+  listen('game-exited', async (event) => {
+    const gamePath = event.payload;
+    await updatePlaytime(gamePath); // 更新游戏时长
+    runningGames.value.delete(gamePath);
+    console.log('Game exited:', gamePath);
+  });
 });
 
 const accessToken = ref('');
+const showToken = ref(false); // 控制 token 显示/隐藏
 
 async function loadToken() {
   try {
@@ -370,19 +399,21 @@ async function launchSelected() {
 }
 
 async function addSelectedToLibrary() {
-  if (!selectedExe.value) return alert('请先选择一个 EXE');
+  if (!selectedExe.value) return showToast('请先选择一个 EXE');
   try {
     await invoke('add_game', { path: selectedExe.value, name: null });
     await listGames();
+    selectedExe.value = ''; // 清空选中状态
+    showToast('加入成功');
   } catch (e) {
-    alert('添加失败: ' + e);
+    showToast('加入失败');
   }
 }
 
 async function removeGame(g) {
   // 添加确认对话框
   if (!confirm(`确定要删除游戏"${g.name}"吗？`)) {
-    return;
+    return false; // 用户取消，返回 false
   }
   
   try {
@@ -406,8 +437,10 @@ async function removeGame(g) {
     }
     await invoke('remove_game', { path: g.path });
     await listGames();
+    return true; // 删除成功，返回 true
   } catch (e) {
     alert('删除失败: ' + e);
+    return false; // 删除失败，返回 false
   }
 }
 
@@ -564,11 +597,107 @@ async function autoFetchImages() {
 }
 
 async function launchFromLibrary(g) {
+  // 检查游戏是否已在运行中
+  if (runningGames.value.has(g.path)) {
+    alert('该游戏已在运行中');
+    return;
+  }
+  
   try {
+    runningGames.value.add(g.path); // 标记为运行中
+    gameStartTimes.value.set(g.path, Date.now()); // 记录启动时间
     await invoke('launch_exe', { path: g.path });
+    // 进程监控会在游戏关闭时自动移除运行状态
   } catch (e) {
+    runningGames.value.delete(g.path); // 启动失败时移除状态
+    gameStartTimes.value.delete(g.path);
     alert('启动失败: ' + e);
   }
+}
+
+// 手动关闭游戏（终止进程）
+async function closeGame(gamePath) {
+  try {
+    await invoke('kill_game', { path: gamePath });
+    // 进程终止后，game-exited 事件会自动触发，移除运行状态
+    // 但为了即时反馈，我们也可以立即移除
+    await updatePlaytime(gamePath);
+    runningGames.value.delete(gamePath);
+  } catch (e) {
+    console.error('关闭游戏失败:', e);
+    // 即使终止失败，也移除运行状态（可能进程已经不存在了）
+    await updatePlaytime(gamePath);
+    runningGames.value.delete(gamePath);
+    alert('关闭游戏失败: ' + e);
+  }
+}
+
+// 更新游戏时长
+async function updatePlaytime(gamePath) {
+  if (!gameStartTimes.value.has(gamePath)) return;
+  
+  const startTime = gameStartTimes.value.get(gamePath);
+  const playedSeconds = Math.floor((Date.now() - startTime) / 1000);
+  const lastPlayed = new Date().toISOString();
+  
+  try {
+    const totalPlaytime = await invoke('update_game_playtime', { 
+      path: gamePath, 
+      additionalSeconds: playedSeconds,
+      lastPlayed: lastPlayed
+    });
+    
+    // 更新本地游戏列表中的时长和最后游玩时间
+    const game = games.value.find(g => g.path === gamePath);
+    if (game) {
+      game.playtime = totalPlaytime;
+      game.last_played = lastPlayed;
+    }
+    
+    console.log(`游戏时长已更新: ${formatPlaytime(totalPlaytime)}`);
+  } catch (e) {
+    console.error('更新游戏时长失败:', e);
+  } finally {
+    gameStartTimes.value.delete(gamePath);
+  }
+}
+
+// 格式化游戏时长显示
+function formatPlaytime(seconds) {
+  if (!seconds || seconds === 0) return '0分钟';
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours > 0) {
+    return `${hours}小时${minutes}分钟`;
+  }
+  return `${minutes}分钟`;
+}
+
+// 格式化最后游玩时间
+function formatLastPlayed(isoString) {
+  if (!isoString) return '';
+  
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  // 如果是今天
+  if (diffDays === 0) {
+    return `今天 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }
+  // 如果是昨天
+  if (diffDays === 1) {
+    return `昨天 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }
+  // 如果是一周内
+  if (diffDays < 7) {
+    return `${diffDays}天前`;
+  }
+  // 否则显示完整日期
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
 }
 
 async function launch(g) {
@@ -817,7 +946,7 @@ function getInfoboxValue(key) {
 </script>
 
 <template>
-  <div style="display:flex; min-height:100vh;">
+  <div @click="showMenu = false" style="display:flex; min-height:100vh;">
     <!-- 左侧固定侧边栏 -->
     <aside style="width:180px; background:#f8f9fa; border-right:1px solid #e0e0e0; padding:0; position:fixed; left:0; top:0; bottom:0; display:flex; flex-direction:column;">
       <div style="padding:20px 16px; border-bottom:1px solid #e0e0e0;">
@@ -844,7 +973,7 @@ function getInfoboxValue(key) {
       <section style="padding:20px; width:100%;">
         <!-- 游戏库页面 -->
       <div v-if="activeTab === 'library'">
-        <!-- 标题栏和多选按钮 -->
+        <!-- 标题栏 -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
           <div style="display:flex; gap:12px; align-items:center; flex:1;">
             <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
@@ -904,29 +1033,71 @@ function getInfoboxValue(key) {
               {{ filteredGames.length }} / {{ games.length }}
             </div>
           </div>
-          <div v-if="games.length > 0" style="display:flex; gap:8px; align-items:center;">
-            <button @click="toggleMultiSelect" style="padding:8px 16px; font-size:13px; white-space:nowrap;">
-              {{ isMultiSelectMode ? '退出多选' : '多选模式' }}
+          
+          <!-- 右上角菜单 -->
+          <div style="position:relative;">
+            <button @click.stop="showMenu = !showMenu" 
+                    style="padding:8px 16px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
+                    @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
+                    @mouseleave="$event.target.style.backgroundColor='#fff'">
+              操作 ▼
             </button>
-            <template v-if="isMultiSelectMode">
-              <button @click="selectAllGames" style="padding:8px 16px; font-size:13px; white-space:nowrap;">全选</button>
-              <button @click="deselectAllGames" style="padding:8px 16px; font-size:13px; white-space:nowrap;">取消全选</button>
-              <button @click="deleteSelectedGames" :disabled="selectedGames.size === 0" style="padding:8px 16px; font-size:13px; white-space:nowrap;">
-                删除选中 ({{ selectedGames.size }})
+            
+            <!-- 下拉菜单 -->
+            <div v-if="showMenu" 
+                 @click.stop
+                 style="position:absolute; top:100%; right:0; margin-top:4px; background:#fff; border:1px solid #e0e0e0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:100; min-width:160px;">
+              <button @click="pickExe(); showMenu = false" 
+                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
+                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                      @mouseleave="$event.target.style.backgroundColor='#fff'">
+                选择游戏
               </button>
-            </template>
+              <button @click="scanFolder(); showMenu = false" 
+                      :disabled="isScanningFolder"
+                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
+                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                      @mouseleave="$event.target.style.backgroundColor='#fff'">
+                {{ isScanningFolder ? '扫描中...' : '扫描文件夹' }}
+              </button>
+              <div style="height:1px; background:#e0e0e0; margin:4px 0;"></div>
+              <button @click="toggleMultiSelect(); showMenu = false" 
+                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
+                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                      @mouseleave="$event.target.style.backgroundColor='#fff'">
+                {{ isMultiSelectMode ? '退出多选模式' : '多选模式' }}
+              </button>
+              <template v-if="isMultiSelectMode">
+                <button @click="selectAllGames(); showMenu = false" 
+                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                        @mouseleave="$event.target.style.backgroundColor='#fff'">
+                  全选
+                </button>
+                <button @click="deselectAllGames(); showMenu = false" 
+                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                        @mouseleave="$event.target.style.backgroundColor='#fff'">
+                  取消全选
+                </button>
+                <button @click="deleteSelectedGames(); showMenu = false" 
+                        :disabled="selectedGames.size === 0"
+                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#f44336; cursor:pointer; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                        @mouseleave="$event.target.style.backgroundColor='#fff'">
+                  删除选中 {{ selectedGames.size > 0 ? `(${selectedGames.size})` : '' }}
+                </button>
+              </template>
+            </div>
           </div>
         </div>
         
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:20px; padding:12px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
-          <button @click="pickExe" style="padding:8px 16px; font-size:13px; white-space:nowrap;">选择游戏</button>
-          <button @click="scanFolder" :disabled="isScanningFolder" style="padding:8px 16px; font-size:13px; white-space:nowrap;">
-            {{ isScanningFolder ? '扫描中...' : '扫描文件夹' }}
-          </button>
-          <button @click="addSelectedToLibrary" :disabled="!selectedExe" style="padding:8px 16px; font-size:13px; white-space:nowrap;">加入游戏库</button>
-          <div v-if="selectedExe" style="flex:1; min-width:150px; font-size:12px; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="selectedExe">
-            {{ selectedExe }}
+        <!-- 选中的游戏显示 -->
+        <div v-if="selectedExe" style="margin-bottom:16px; padding:12px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0; display:flex; gap:8px; align-items:center;">
+          <div style="flex:1; font-size:12px; color:#666; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="selectedExe">
+            已选择: {{ selectedExe }}
           </div>
+          <button @click="addSelectedToLibrary" style="padding:6px 12px; font-size:12px; white-space:nowrap;">加入游戏库</button>
         </div>
 
         <div v-if="games.length === 0" style="text-align:center; padding:60px 20px; color:#ccc;">
@@ -946,13 +1117,30 @@ function getInfoboxValue(key) {
                  overflow: 'hidden',
                  transition: 'all 0.2s',
                  background: selectedGames.has(g.path) ? '#f0f0f0' : '#fafafa',
-                 userSelect: 'none'
+                 userSelect: 'none',
+                 cursor: 'pointer'
                }"
                @click.stop="isMultiSelectMode ? toggleGameSelection(g) : openGameDetail(g)"
-               @mouseenter="if (!selectedGames.has(g.path)) { $event.currentTarget.style.backgroundColor='#f5f5f5'; $event.currentTarget.style.borderColor='#ccc' }"
+               @mouseenter="if (!selectedGames.has(g.path)) { $event.currentTarget.style.backgroundColor='#eeeeee'; $event.currentTarget.style.borderColor='#bbb' }"
                @mouseleave="if (!selectedGames.has(g.path)) { $event.currentTarget.style.backgroundColor='#fafafa'; $event.currentTarget.style.borderColor='#e0e0e0' }">
             <div style="width:140px; height:196px; position:relative; background:#f0f0f0; overflow:hidden;">
               <img v-if="g.image" :src="getImageSrc(g.image)" style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;" />
+              <!-- 运行中状态指示器 -->
+              <div v-if="runningGames.has(g.path)" 
+                   :style="{
+                     position: 'absolute',
+                     top: '8px',
+                     left: '8px',
+                     padding: '4px 8px',
+                     borderRadius: '3px',
+                     background: 'rgba(76, 175, 80, 0.9)',
+                     color: '#fff',
+                     fontSize: '11px',
+                     fontWeight: '500',
+                     boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                   }">
+                运行中
+              </div>
               <!-- 多选模式下显示选中标记 -->
               <div v-if="isMultiSelectMode" 
                    :style="{
@@ -981,10 +1169,17 @@ function getInfoboxValue(key) {
                 {{ g.path.split(/[\\/]/).pop() }}
               </div>
               <div v-if="!isMultiSelectMode" style="display:flex; gap:4px;" @click.stop>
-                <button @click="launchFromLibrary(g)" 
-                        style="flex:1; padding:5px; font-size:11px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">启动</button>
+                <!-- 运行中时显示关闭按钮（红色），否则显示启动按钮（绿色） -->
+                <button v-if="runningGames.has(g.path)" 
+                        @click="closeGame(g.path)" 
+                        style="flex:1; padding:5px; font-size:11px; background:#f44336; border:1px solid #f44336; color:#fff; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#d32f2f'; $event.target.style.borderColor='#d32f2f'"
+                        @mouseleave="$event.target.style.backgroundColor='#f44336'; $event.target.style.borderColor='#f44336'">关闭</button>
+                <button v-else 
+                        @click="launchFromLibrary(g)" 
+                        style="flex:1; padding:5px; font-size:11px; background:#4CAF50; border:1px solid #4CAF50; color:#fff; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#45a049'; $event.target.style.borderColor='#45a049'"
+                        @mouseleave="$event.target.style.backgroundColor='#4CAF50'; $event.target.style.borderColor='#4CAF50'">启动</button>
                 <button @click.stop="openReplaceModal(g)" 
                         style="padding:5px 8px; font-size:11px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
                         @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
@@ -1015,31 +1210,20 @@ function getInfoboxValue(key) {
             用于访问 NSFW 内容。在 <a href="https://bgm.tv/dev/app" target="_blank" style="color:#666; text-decoration:underline;">Bangumi 开发者页面</a> 获取。
           </div>
           <div style="display:flex; gap:8px;">
-            <input v-model="accessToken" 
-                   type="password"
-                   placeholder="输入 Access Token" 
-                   style="flex:1; padding:8px 12px; font-size:13px;" />
+            <div style="position:relative; flex:1;">
+              <input v-model="accessToken" 
+                     :type="showToken ? 'text' : 'password'"
+                     placeholder="输入 Access Token" 
+                     style="width:100%; padding:8px 40px 8px 12px; font-size:13px; box-sizing:border-box;" />
+              <button @click="showToken = !showToken" 
+                      style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:4px 8px; font-size:12px; background:transparent; border:1px solid #ddd; color:#666; cursor:pointer; transition:all 0.2s;"
+                      @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
+                      @mouseleave="$event.target.style.backgroundColor='transparent'; $event.target.style.borderColor='#ddd'">
+                {{ showToken ? '隐藏' : '显示' }}
+              </button>
+            </div>
             <button @click="saveToken" style="padding:8px 16px; font-size:13px;">保存</button>
           </div>
-        </div>
-
-        <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
-          <div style="font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">缓存管理</div>
-          <div style="font-size:12px; color:#999; margin-bottom:10px;">
-            游戏详情会被永久缓存到 game_data/bangumi_cache.json 文件。当前缓存项数: {{ detailCache.size }}
-          </div>
-          <button @click="clearAllCache(); alert('缓存已清除');" style="padding:8px 16px; font-size:13px;">清除所有缓存</button>
-        </div>
-
-        <div style="padding:12px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
-          <div style="font-weight:500; margin-bottom:6px; font-size:13px; color:#333;">使用提示</div>
-          <ul style="margin:0; padding-left:18px; font-size:12px; color:#666; line-height:1.6;">
-            <li>添加游戏后会自动从 Bangumi 搜索封面和信息</li>
-            <li>点击游戏卡片可以查看详细信息（需要先关联 Bangumi 条目）</li>
-            <li>使用"替换"按钮可以手动搜索并更换游戏信息</li>
-            <li>游戏数据保存在 game_data/games_db.json 文件中</li>
-            <li>游戏详情缓存保存在 game_data/bangumi_cache.json，删除游戏时会自动清除对应缓存</li>
-          </ul>
         </div>
       </div>
     </section>
@@ -1121,13 +1305,28 @@ function getInfoboxValue(key) {
             
             <!-- 右侧信息 -->
             <div style="flex:1; min-width:300px;">
-              <!-- 标题 -->
-              <h2 style="margin:0 0 8px 0; font-size:20px; font-weight:600; color:#333;">
-                {{ detailData.name_cn || detailData.name }}
-              </h2>
-              <div v-if="detailData.name_cn && detailData.name" style="margin-bottom:16px; font-size:14px; color:#999;">
+              <!-- 标题、运行状态和游戏时长 -->
+              <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:8px;">
+                <h2 style="margin:0; font-size:20px; font-weight:600; color:#333;">
+                  {{ detailData.name_cn || detailData.name }}
+                </h2>
+                <!-- 运行中状态 -->
+                <div v-if="detailGame && runningGames.has(detailGame.path)" 
+                     style="padding:4px 10px; background:rgba(76, 175, 80, 0.9); color:#fff; font-size:12px; font-weight:500; border-radius:3px; white-space:nowrap;">
+                  运行中
+                </div>
+                <div v-if="detailGame && detailGame.playtime > 0" style="font-size:14px; color:#666; white-space:nowrap;">
+                  ⏱ {{ formatPlaytime(detailGame.playtime) }}
+                </div>
+              </div>
+              <div v-if="detailData.name_cn && detailData.name" style="margin-bottom:4px; font-size:14px; color:#999;">
                 {{ detailData.name }}
               </div>
+              <!-- 最后游玩时间 -->
+              <div v-if="detailGame && detailGame.last_played" style="margin-bottom:16px; font-size:12px; color:#999;">
+                最后游玩: {{ formatLastPlayed(detailGame.last_played) }}
+              </div>
+              <div v-else style="margin-bottom:16px;"></div>
               
               <!-- 基本信息 -->
               <div style="background:#f8f9fa; padding:16px; border-radius:4px; margin-bottom:16px; border:1px solid #e0e0e0;">
@@ -1180,13 +1379,22 @@ function getInfoboxValue(key) {
         
         <!-- 底部操作栏 -->
         <div style="padding:16px 20px; border-top:1px solid #e0e0e0; display:flex; gap:8px; justify-content:flex-end; background:#f8f9fa;">
-          <button v-if="detailGame" @click="launchFromLibrary(detailGame); closeDetailModal();" 
-                  style="padding:8px 20px; font-size:13px; background:#fff; border:1px solid #999; color:#333; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#666'"
-                  @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#999'">
+          <!-- 运行中时显示关闭按钮（红色），否则显示启动按钮（绿色） -->
+          <button v-if="detailGame && runningGames.has(detailGame.path)" 
+                  @click="closeGame(detailGame.path)" 
+                  style="padding:8px 20px; font-size:13px; background:#f44336; border:1px solid #f44336; color:#fff; transition:all 0.2s;"
+                  @mouseenter="$event.target.style.backgroundColor='#d32f2f'; $event.target.style.borderColor='#d32f2f'"
+                  @mouseleave="$event.target.style.backgroundColor='#f44336'; $event.target.style.borderColor='#f44336'">
+            关闭游戏
+          </button>
+          <button v-else-if="detailGame" 
+                  @click="launchFromLibrary(detailGame)" 
+                  style="padding:8px 20px; font-size:13px; background:#4CAF50; border:1px solid #4CAF50; color:#fff; transition:all 0.2s;"
+                  @mouseenter="$event.target.style.backgroundColor='#45a049'; $event.target.style.borderColor='#45a049'"
+                  @mouseleave="$event.target.style.backgroundColor='#4CAF50'; $event.target.style.borderColor='#4CAF50'">
             启动游戏
           </button>
-          <button v-if="detailGame" @click="removeGame(detailGame); closeDetailModal();" 
+          <button v-if="detailGame" @click="async () => { if (await removeGame(detailGame)) closeDetailModal() }" 
                   style="padding:8px 20px; font-size:13px; background:#fff; border:1px solid #ddd; color:#999; transition:all 0.2s;"
                   @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
                   @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">
@@ -1241,6 +1449,12 @@ function getInfoboxValue(key) {
       </div>
     </div>
   </main>
+  
+  <!-- Toast 提示 -->
+  <div v-if="toastVisible" 
+       style="position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.8); color:#fff; padding:12px 24px; border-radius:4px; font-size:14px; z-index:9999; animation:fadeIn 0.3s;">
+    {{ toastMessage }}
+  </div>
   </div>
 </template>
 
@@ -1254,6 +1468,18 @@ aside button.active {
   background-color: #e8e8e8;
   border-left-color: #666 !important;
   font-weight: 500;
+}
+
+/* Toast 动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 </style>
 

@@ -5,7 +5,7 @@
     <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
       <label style="display:block; font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">Bangumi Access Token</label>
       <div style="font-size:12px; color:#999; margin-bottom:10px;">
-        用于访问 NSFW 内容。在 <a href="https://bgm.tv/dev/app" target="_blank" style="color:#666; text-decoration:underline;">Bangumi 开发者页面</a> 获取。
+        用于访问 NSFW 内容。在 <a href="https://next.bgm.tv/demo/access-token " target="_blank" style="color:#666; text-decoration:underline;">Bangumi access-token</a> 获取。
       </div>
       <div style="display:flex; gap:8px;">
         <div style="position:relative; flex:1;">
@@ -28,7 +28,7 @@
     <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
       <label style="display:block; font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">网络连接测试</label>
       <div style="font-size:12px; color:#999; margin-bottom:10px;">
-        测试与 Bangumi 的网络连接和 API 访问是否正常
+        测试与 Bangumi 访问是否正常
       </div>
       <div style="display:flex; flex-direction:column; gap:12px;">
         <button @click="testNetwork" 

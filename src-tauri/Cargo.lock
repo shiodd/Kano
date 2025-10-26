@@ -1934,6 +1934,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kano"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.11.27",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "urlencoding",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4261,20 +4275,6 @@ dependencies = [
  "futf",
  "mac",
  "utf-8",
-]
-
-[[package]]
-name = "test"
-version = "0.1.0"
-dependencies = [
- "reqwest 0.11.27",
- "rfd",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "urlencoding",
 ]
 
 [[package]]

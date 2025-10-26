@@ -3,7 +3,12 @@ import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import BangumiTest from './components/BangumiTest.vue';
+import Settings from './pages/Settings.vue';
+import About from './pages/About.vue';
+import Sidebar from './components/Sidebar.vue';
+import GameLibrary from './pages/GameLibrary.vue';
+import GameDetailModal from './components/GameDetailModal.vue';
+import ReplaceModal from './components/ReplaceModal.vue';
 
 const greetMsg = ref("");
 const name = ref("");
@@ -247,13 +252,19 @@ async function deleteSelectedGames() {
 
 async function listGames() {
   try {
+    isLoadingGames.value = true;
+    loadedGamesCount.value = 0;
     const res = await invoke('list_games');
     games.value = res || [];
+    totalGamesCount.value = games.value.length;
+    loadedGamesCount.value = games.value.length;
     // after loading games, automatically try to fetch images for games without images
     autoFetchImages();
   } catch (e) {
     console.error('list_games failed', e);
     games.value = [];
+  } finally {
+    isLoadingGames.value = false;
   }
 }
 
@@ -265,37 +276,14 @@ onMounted(async () => {
   }
   loadCacheFromFile(); // Load cache first
   listGames();
-  loadToken();
   
   // Listen for game exit events
   listen('game-exited', async (event) => {
     const gamePath = event.payload;
-    await updatePlaytime(gamePath); // 更新游戏时长
+    await updatePlaytime(gamePath);
     runningGames.value.delete(gamePath);
-    console.log('Game exited:', gamePath);
   });
 });
-
-const accessToken = ref('');
-const showToken = ref(false); // 控制 token 显示/隐藏
-
-async function loadToken() {
-  try {
-    const t = await invoke('get_access_token');
-    accessToken.value = t || '';
-  } catch (e) {
-    console.error('get_access_token failed', e);
-  }
-}
-
-async function saveToken() {
-  try {
-    await invoke('set_access_token', { token: accessToken.value });
-    alert('已保存 access token');
-  } catch (e) {
-    alert('保存失败: ' + e);
-  }
-}
 
 // (Bangumi search on main page removed — use the BangumiTest component instead)
 
@@ -303,6 +291,9 @@ async function saveToken() {
 const activeTab = ref('library');
 const bangumiLoading = ref(false);
 const imageFetchRunning = ref(false);
+const isLoadingGames = ref(false);
+const loadedGamesCount = ref(0);
+const totalGamesCount = ref(0);
 
 function formatSeconds(s) {
   const h = Math.floor(s / 3600);
@@ -362,7 +353,11 @@ async function scanFolder() {
 async function addScannedGames(selectedGames) {
   try {
     for (const game of selectedGames) {
-      await invoke('add_game', { path: game.path, name: game.name });
+      await invoke('add_game', { 
+        path: game.path, 
+        name: game.name,
+        folderPath: game.folder_path
+      });
     }
     scannedGames.value = [];
     selectedScannedGames.value = new Set();
@@ -401,7 +396,7 @@ async function launchSelected() {
 async function addSelectedToLibrary() {
   if (!selectedExe.value) return showToast('请先选择一个 EXE');
   try {
-    await invoke('add_game', { path: selectedExe.value, name: null });
+    await invoke('add_game', { path: selectedExe.value, name: null, folderPath: null });
     await listGames();
     selectedExe.value = ''; // 清空选中状态
     showToast('加入成功');
@@ -448,55 +443,56 @@ async function removeGame(g) {
 // Returns true if image was found and saved.
 async function fetchImageForGame(g) {
   try {
-    // prefer containing folder name first, then fallback to exe basename
     const p = g.path || '';
     const parts = p.split(/[\\/]/);
-    let folder = '';
-    if (parts.length >= 2) folder = parts[parts.length - 2];
-    const exeName = parts.pop() || p;
-    let res = null;
-    const filter = { type: [4], nsfw: true };
+    const exeName = parts[parts.length - 1] || p;
     
-    // Search without cache (temporary searches don't need caching)
-    if (folder) {
-      res = await invoke('search_bangumi', { query: folder, filter });
-    }
-    if (!res) {
-      res = await invoke('search_bangumi', { query: exeName, filter });
+    // 使用扫描时提取的 folder_path（从游戏文件夹内部开始的相对路径）
+    let gameFolderNames = [];
+    if (g.folder_path && Array.isArray(g.folder_path) && g.folder_path.length > 0) {
+      gameFolderNames = [...g.folder_path];
     }
     
-    let list = [];
-    if (res) {
-      if (Array.isArray(res)) list = res;
-      else if (res.data && Array.isArray(res.data)) list = res.data;
-      else if (res.results && Array.isArray(res.results)) list = res.results;
-      else if (res.subjects && Array.isArray(res.subjects)) list = res.subjects;
-      else if (res.items && Array.isArray(res.items)) list = res.items;
-      else {
-        for (const k in res) if (Array.isArray(res[k])) { list = res[k]; break; }
+    // 如果没有 folder_path 或为空数组，尝试从 exe 路径提取文件夹名
+    if (gameFolderNames.length === 0) {
+      const pathParts = p.split(/[\\/]/).filter(Boolean);
+      if (pathParts.length >= 2) {
+        gameFolderNames = [pathParts[pathParts.length - 2]];
+      } else {
+        return false;
       }
     }
-    // fallback: try containing folder name
-    if ((!list || list.length === 0) && p) {
-      const parts = p.split(/[\\/]/);
-      if (parts.length >= 2) {
-        const folder = parts[parts.length - 2];
-        res = await invoke('search_bangumi', { query: folder, filter });
-        if (res) {
-          if (Array.isArray(res)) list = res;
-          else if (res.data && Array.isArray(res.data)) list = res.data;
-          else if (res.results && Array.isArray(res.results)) list = res.results;
-          else if (res.subjects && Array.isArray(res.subjects)) list = res.subjects;
-          else if (res.items && Array.isArray(res.items)) list = res.items;
-          else { for (const k in res) if (Array.isArray(res[k])) { list = res[k]; break; } }
+    
+    let res = null;
+    let list = [];
+    const filter = { type: [4], nsfw: true };
+    
+    // Try 1-N: 依次使用各层文件夹名搜索
+    for (const folderName of gameFolderNames) {
+      if (!folderName) continue;
+      
+      res = await invoke('search_bangumi', { query: folderName, filter });
+      if (res) {
+        if (Array.isArray(res)) list = res;
+        else if (res.data && Array.isArray(res.data)) list = res.data;
+        else if (res.results && Array.isArray(res.results)) list = res.results;
+        else if (res.subjects && Array.isArray(res.subjects)) list = res.subjects;
+        else if (res.items && Array.isArray(res.items)) list = res.items;
+        else {
+          for (const k in res) if (Array.isArray(res[k])) { list = res[k]; break; }
         }
+      }
+      
+      // 如果找到结果，停止搜索
+      if (list && list.length > 0) {
+        break;
       }
     }
 
   // If we have results, try to get image and save it to game
     if (list && list.length > 0) {
-      // if folder or exe name contains 'FD' (case-insensitive), prefer second result
-      const fdFlag = ((folder && /fd/i.test(folder)) || (/fd/i.test(exeName)));
+      // if game name or exe name contains 'FD' (case-insensitive), prefer second result
+      const fdFlag = gameFolderNames.some(name => /fd/i.test(name)) || /fd/i.test(exeName);
       const idx = (fdFlag && list.length > 1) ? 1 : 0;
       const first = list[idx];
       
@@ -527,12 +523,14 @@ async function fetchImageForGame(g) {
             path: g.path,
             name: title,
             image: image,
+            imageUrl: image, // 同时保存网络地址
             subjectId: numericSid
           });
           
           // update local copy from backend result
           if (updRes && updRes.name) g.name = updRes.name;
           if (updRes && updRes.image) g.image = updRes.image;
+          if (updRes && updRes.image_url) g.image_url = updRes.image_url;
           if (updRes && updRes.subject_id) g.subject_id = updRes.subject_id;
           
           // 立即下载图片并缓存详情信息
@@ -550,6 +548,7 @@ async function fetchImageForGame(g) {
                   path: g.path,
                   name: null,
                   image: localImagePath,
+                  imageUrl: null,
                   subjectId: null
                 });
                 g.image = localImagePath;
@@ -584,12 +583,17 @@ async function autoFetchImages() {
   if (imageFetchRunning.value) return;
   imageFetchRunning.value = true;
   try {
-    for (const g of games.value) {
-      if (!g.image) {
-        await fetchImageForGame(g);
-        // small delay to avoid hammering the API
-        await new Promise((r) => setTimeout(r, 200));
-      }
+    let processedCount = 0;
+    const gamesWithoutImage = games.value.filter(g => !g.image);
+    totalGamesCount.value = gamesWithoutImage.length;
+    loadedGamesCount.value = 0;
+    
+    for (const g of gamesWithoutImage) {
+      await fetchImageForGame(g);
+      processedCount++;
+      loadedGamesCount.value = processedCount;
+      // small delay to avoid hammering the API
+      await new Promise((r) => setTimeout(r, 200));
     }
   } finally {
     imageFetchRunning.value = false;
@@ -619,12 +623,9 @@ async function launchFromLibrary(g) {
 async function closeGame(gamePath) {
   try {
     await invoke('kill_game', { path: gamePath });
-    // 进程终止后，game-exited 事件会自动触发，移除运行状态
-    // 但为了即时反馈，我们也可以立即移除
     await updatePlaytime(gamePath);
     runningGames.value.delete(gamePath);
   } catch (e) {
-    console.error('关闭游戏失败:', e);
     // 即使终止失败，也移除运行状态（可能进程已经不存在了）
     await updatePlaytime(gamePath);
     runningGames.value.delete(gamePath);
@@ -653,10 +654,8 @@ async function updatePlaytime(gamePath) {
       game.playtime = totalPlaytime;
       game.last_played = lastPlayed;
     }
-    
-    console.log(`游戏时长已更新: ${formatPlaytime(totalPlaytime)}`);
   } catch (e) {
-    console.error('更新游戏时长失败:', e);
+    // 更新游戏时长失败
   } finally {
     gameStartTimes.value.delete(gamePath);
   }
@@ -673,6 +672,16 @@ function formatPlaytime(seconds) {
     return `${hours}小时${minutes}分钟`;
   }
   return `${minutes}分钟`;
+}
+
+// 处理图片下载完成事件
+async function handleImageDownloaded({ path, localPath }) {
+  const game = games.value.find(g => g.path === path);
+  if (game) {
+    game.image = localPath;
+    // 重新加载游戏列表以确保数据一致
+    await loadGames();
+  }
 }
 
 // 格式化最后游玩时间
@@ -754,14 +763,13 @@ async function replaceExeFile() {
   if (!replaceTargetGame.value) return;
   
   try {
-    // 获取当前 exe 文件的目录
     const currentPath = replaceTargetGame.value.path;
     const pathParts = currentPath.split(/[\\/]/);
-    pathParts.pop(); // 移除文件名
-    const initialDir = pathParts.join('\\'); // 重新组合为目录路径
+    pathParts.pop();
+    const initialDir = pathParts.join('\\');
     
     const newPath = await invoke('pick_exe', { initialDir });
-    if (!newPath) return; // 用户取消选择
+    if (!newPath) return;
     
     const oldPath = replaceTargetGame.value.path;
     
@@ -770,20 +778,26 @@ async function replaceExeFile() {
       path: oldPath,
       name: null,
       image: null,
+      imageUrl: null,
       subjectId: null
     });
     
     // 从数据库中删除旧路径的游戏
     await invoke('remove_game', { path: oldPath });
     
-    // 添加新路径的游戏（复制原有信息）
-    await invoke('add_game', { path: newPath, name: replaceTargetGame.value.name });
+    // 添加新路径的游戏（复制原有信息，保留 folder_path）
+    await invoke('add_game', { 
+      path: newPath, 
+      name: replaceTargetGame.value.name,
+      folderPath: replaceTargetGame.value.folder_path || null
+    });
     
     // 更新新游戏的完整信息
     await invoke('update_game_info', {
       path: newPath,
       name: replaceTargetGame.value.name,
       image: replaceTargetGame.value.image,
+      imageUrl: replaceTargetGame.value.image_url,
       subjectId: replaceTargetGame.value.subject_id
     });
     
@@ -799,19 +813,19 @@ async function replaceExeFile() {
     alert('EXE 文件已更换');
     closeReplaceModal();
   } catch (e) {
-    // 用户取消时不提示错误
     if (e === 'cancelled' || e === 'canceled') return;
-    console.error('更换 EXE 文件失败:', e);
     alert('更换失败: ' + e);
   }
 }
 
-async function runReplaceSearch() {
-  if (!replaceSearchKeyword.value) return;
+async function runReplaceSearch(keyword) {
+  const searchKeyword = keyword || replaceSearchKeyword.value;
+  if (!searchKeyword) return;
+  replaceSearchKeyword.value = searchKeyword;
   replaceLoading.value = true;
   try {
     const filter = { type: [4], nsfw: true };
-    const res = await invoke('search_bangumi', { query: replaceSearchKeyword.value, filter });
+    const res = await invoke('search_bangumi', { query: searchKeyword, filter });
     
     let list = [];
     if (res) {
@@ -852,10 +866,17 @@ async function selectReplaceItem(item) {
   const oldSubjectId = replaceTargetGame.value.subject_id;
   
   try {
-    const updRes = await invoke('update_game_info', { path: replaceTargetGame.value.path, name: title, image, subjectId: sid });
+    const updRes = await invoke('update_game_info', { 
+      path: replaceTargetGame.value.path, 
+      name: title, 
+      image, 
+      imageUrl: image, // 同时保存网络地址
+      subjectId: sid 
+    });
     // update local copy from backend result
     if (updRes && updRes.name) replaceTargetGame.value.name = updRes.name;
     if (updRes && updRes.image) replaceTargetGame.value.image = updRes.image;
+    if (updRes && updRes.image_url) replaceTargetGame.value.image_url = updRes.image_url;
     if (updRes && updRes.subject_id) replaceTargetGame.value.subject_id = updRes.subject_id;
     
     // 如果更换了条目，删除旧的缓存和图片
@@ -883,6 +904,7 @@ async function selectReplaceItem(item) {
             path: replaceTargetGame.value.path,
             name: null,
             image: localImagePath,
+            imageUrl: null,
             subjectId: null
           });
           replaceTargetGame.value.image = localImagePath;
@@ -948,461 +970,80 @@ function getInfoboxValue(key) {
 <template>
   <div @click="showMenu = false" style="display:flex; min-height:100vh;">
     <!-- 左侧固定侧边栏 -->
-    <aside style="width:180px; background:#f8f9fa; border-right:1px solid #e0e0e0; padding:0; position:fixed; left:0; top:0; bottom:0; display:flex; flex-direction:column;">
-      <div style="padding:20px 16px; border-bottom:1px solid #e0e0e0;">
-        <h2 style="margin:0; font-size:16px; font-weight:600; color:#333;">游戏管理器</h2>
-      </div>
-      <nav style="flex:1; padding:12px 0; display:flex; flex-direction:column; gap:2px;">
-        <button :class="{active: activeTab === 'library'}" @click="activeTab = 'library'" 
-                style="text-align:left; padding:10px 16px; font-size:14px; background:transparent; border:none; color:#666; cursor:pointer; transition:all 0.2s; border-left:2px solid transparent;">
-          游戏库
-        </button>
-        <button :class="{active: activeTab === 'test'}" @click="activeTab = 'test'" 
-                style="text-align:left; padding:10px 16px; font-size:14px; background:transparent; border:none; color:#666; cursor:pointer; transition:all 0.2s; border-left:2px solid transparent;">
-          Bangumi 测试
-        </button>
-        <button :class="{active: activeTab === 'settings'}" @click="activeTab = 'settings'" 
-                style="text-align:left; padding:10px 16px; font-size:14px; background:transparent; border:none; color:#666; cursor:pointer; transition:all 0.2s; border-left:2px solid transparent;">
-          设置
-        </button>
-      </nav>
-    </aside>
+    <Sidebar v-model="activeTab" />
 
     <!-- 右侧主内容区域 -->
     <main style="flex:1; margin-left:180px; background:#fff; min-height:100vh;">
       <section style="padding:20px; width:100%;">
         <!-- 游戏库页面 -->
       <div v-if="activeTab === 'library'">
-        <!-- 标题栏 -->
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <div style="display:flex; gap:12px; align-items:center; flex:1;">
-            <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
-            
-            <!-- 搜索框 -->
-            <div style="flex:1; max-width:300px;">
-              <input v-model="searchKeyword" 
-                     placeholder="搜索游戏..." 
-                     style="width:100%; padding:6px 12px; font-size:13px; border:1px solid #e0e0e0; border-radius:4px; outline:none;"
-                     @focus="$event.target.style.borderColor='#999'"
-                     @blur="$event.target.style.borderColor='#e0e0e0'" />
-            </div>
-            
-            <!-- 筛选按钮 -->
-            <div style="display:flex; gap:4px; align-items:center; padding:4px; background:#fff; border-radius:4px; border:1px solid #e0e0e0;">
-              <button @click="setFilter('全部')" 
-                      :style="{
-                        padding: '4px 12px',
-                        fontSize: '12px',
-                        background: selectedFilter === '全部' ? '#e8e8e8' : '#fff',
-                        border: selectedFilter === '全部' ? '1px solid #999' : '1px solid #ddd',
-                        color: selectedFilter === '全部' ? '#333' : '#666',
-                        fontWeight: selectedFilter === '全部' ? '500' : '400',
-                        borderRadius: '3px',
-                        cursor: 'pointer'
-                      }">
-                全部
-              </button>
-              <button @click="setFilter('ADV')" 
-                      :style="{
-                        padding: '4px 12px',
-                        fontSize: '12px',
-                        background: selectedFilter === 'ADV' ? '#e8e8e8' : '#fff',
-                        border: selectedFilter === 'ADV' ? '1px solid #999' : '1px solid #ddd',
-                        color: selectedFilter === 'ADV' ? '#333' : '#666',
-                        fontWeight: selectedFilter === 'ADV' ? '500' : '400',
-                        borderRadius: '3px',
-                        cursor: 'pointer'
-                      }">
-                ADV
-              </button>
-              <button @click="setFilter('RPG')" 
-                      :style="{
-                        padding: '4px 12px',
-                        fontSize: '12px',
-                        background: selectedFilter === 'RPG' ? '#e8e8e8' : '#fff',
-                        border: selectedFilter === 'RPG' ? '1px solid #999' : '1px solid #ddd',
-                        color: selectedFilter === 'RPG' ? '#333' : '#666',
-                        fontWeight: selectedFilter === 'RPG' ? '500' : '400',
-                        borderRadius: '3px',
-                        cursor: 'pointer'
-                      }">
-                RPG
-              </button>
-            </div>
-            <div style="font-size:12px; color:#999;">
-              {{ filteredGames.length }} / {{ games.length }}
-            </div>
-          </div>
-          
-          <!-- 右上角菜单 -->
-          <div style="position:relative;">
-            <button @click.stop="showMenu = !showMenu" 
-                    style="padding:8px 16px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
-                    @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
-                    @mouseleave="$event.target.style.backgroundColor='#fff'">
-              操作 ▼
-            </button>
-            
-            <!-- 下拉菜单 -->
-            <div v-if="showMenu" 
-                 @click.stop
-                 style="position:absolute; top:100%; right:0; margin-top:4px; background:#fff; border:1px solid #e0e0e0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:100; min-width:160px;">
-              <button @click="pickExe(); showMenu = false" 
-                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                      @mouseleave="$event.target.style.backgroundColor='#fff'">
-                选择游戏
-              </button>
-              <button @click="scanFolder(); showMenu = false" 
-                      :disabled="isScanningFolder"
-                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                      @mouseleave="$event.target.style.backgroundColor='#fff'">
-                {{ isScanningFolder ? '扫描中...' : '扫描文件夹' }}
-              </button>
-              <div style="height:1px; background:#e0e0e0; margin:4px 0;"></div>
-              <button @click="toggleMultiSelect(); showMenu = false" 
-                      style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                      @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                      @mouseleave="$event.target.style.backgroundColor='#fff'">
-                {{ isMultiSelectMode ? '退出多选模式' : '多选模式' }}
-              </button>
-              <template v-if="isMultiSelectMode">
-                <button @click="selectAllGames(); showMenu = false" 
-                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'">
-                  全选
-                </button>
-                <button @click="deselectAllGames(); showMenu = false" 
-                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'">
-                  取消全选
-                </button>
-                <button @click="deleteSelectedGames(); showMenu = false" 
-                        :disabled="selectedGames.size === 0"
-                        style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#f44336; cursor:pointer; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'">
-                  删除选中 {{ selectedGames.size > 0 ? `(${selectedGames.size})` : '' }}
-                </button>
-              </template>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 选中的游戏显示 -->
-        <div v-if="selectedExe" style="margin-bottom:16px; padding:12px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0; display:flex; gap:8px; align-items:center;">
-          <div style="flex:1; font-size:12px; color:#666; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" :title="selectedExe">
-            已选择: {{ selectedExe }}
-          </div>
-          <button @click="addSelectedToLibrary" style="padding:6px 12px; font-size:12px; white-space:nowrap;">加入游戏库</button>
-        </div>
-
-        <div v-if="games.length === 0" style="text-align:center; padding:60px 20px; color:#ccc;">
-          <div style="font-size:14px;">暂无游戏</div>
-        </div>
-        
-        <div v-else-if="filteredGames.length === 0" style="text-align:center; padding:60px 20px; color:#ccc;">
-          <div style="font-size:14px;">当前筛选条件下没有游戏</div>
-        </div>
-        
-        <div v-else style="display:grid; grid-template-columns:repeat(auto-fill, 140px); gap:12px;">
-          <div v-for="g in filteredGames" :key="g.path" 
-               :style="{
-                 width: '140px',
-                 border: selectedGames.has(g.path) ? '2px solid #666' : '1px solid #e0e0e0',
-                 borderRadius: '4px',
-                 overflow: 'hidden',
-                 transition: 'all 0.2s',
-                 background: selectedGames.has(g.path) ? '#f0f0f0' : '#fafafa',
-                 userSelect: 'none',
-                 cursor: 'pointer'
-               }"
-               @click.stop="isMultiSelectMode ? toggleGameSelection(g) : openGameDetail(g)"
-               @mouseenter="if (!selectedGames.has(g.path)) { $event.currentTarget.style.backgroundColor='#eeeeee'; $event.currentTarget.style.borderColor='#bbb' }"
-               @mouseleave="if (!selectedGames.has(g.path)) { $event.currentTarget.style.backgroundColor='#fafafa'; $event.currentTarget.style.borderColor='#e0e0e0' }">
-            <div style="width:140px; height:196px; position:relative; background:#f0f0f0; overflow:hidden;">
-              <img v-if="g.image" :src="getImageSrc(g.image)" style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;" />
-              <!-- 运行中状态指示器 -->
-              <div v-if="runningGames.has(g.path)" 
-                   :style="{
-                     position: 'absolute',
-                     top: '8px',
-                     left: '8px',
-                     padding: '4px 8px',
-                     borderRadius: '3px',
-                     background: 'rgba(76, 175, 80, 0.9)',
-                     color: '#fff',
-                     fontSize: '11px',
-                     fontWeight: '500',
-                     boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                   }">
-                运行中
-              </div>
-              <!-- 多选模式下显示选中标记 -->
-              <div v-if="isMultiSelectMode" 
-                   :style="{
-                     position: 'absolute',
-                     top: '8px',
-                     right: '8px',
-                     width: '20px',
-                     height: '20px',
-                     borderRadius: '3px',
-                     background: selectedGames.has(g.path) ? '#666' : '#fff',
-                     border: '2px solid #666',
-                     display: 'flex',
-                     alignItems: 'center',
-                     justifyContent: 'center',
-                     fontSize: '12px',
-                     transition: 'all 0.2s'
-                   }">
-                <span v-if="selectedGames.has(g.path)" style="color:#fff; font-weight:bold;">✓</span>
-              </div>
-            </div>
-            <div style="padding:8px;">
-              <div style="font-size:12px; font-weight:500; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#333;" :title="g.name">
-                {{ g.name }}
-              </div>
-              <div style="font-size:10px; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:6px;" :title="g.path">
-                {{ g.path.split(/[\\/]/).pop() }}
-              </div>
-              <div v-if="!isMultiSelectMode" style="display:flex; gap:4px;" @click.stop>
-                <!-- 运行中时显示关闭按钮（红色），否则显示启动按钮（绿色） -->
-                <button v-if="runningGames.has(g.path)" 
-                        @click="closeGame(g.path)" 
-                        style="flex:1; padding:5px; font-size:11px; background:#f44336; border:1px solid #f44336; color:#fff; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#d32f2f'; $event.target.style.borderColor='#d32f2f'"
-                        @mouseleave="$event.target.style.backgroundColor='#f44336'; $event.target.style.borderColor='#f44336'">关闭</button>
-                <button v-else 
-                        @click="launchFromLibrary(g)" 
-                        style="flex:1; padding:5px; font-size:11px; background:#4CAF50; border:1px solid #4CAF50; color:#fff; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#45a049'; $event.target.style.borderColor='#45a049'"
-                        @mouseleave="$event.target.style.backgroundColor='#4CAF50'; $event.target.style.borderColor='#4CAF50'">启动</button>
-                <button @click.stop="openReplaceModal(g)" 
-                        style="padding:5px 8px; font-size:11px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">替换</button>
-                <button @click="removeGame(g)" 
-                        style="padding:5px 8px; font-size:11px; background:#fff; border:1px solid #ddd; color:#999; transition:all 0.2s;"
-                        @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
-                        @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">删除</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bangumi 测试页面 -->
-      <div v-else-if="activeTab === 'test'">
-        <h1 style="margin:0 0 20px 0; font-size:20px; font-weight:500; color:#333;">Bangumi 测试</h1>
-        <BangumiTest />
+        <GameLibrary 
+          :games="games"
+          :filtered-games="filteredGames"
+          :running-games="runningGames"
+          :selected-games="selectedGames"
+          :project-root="projectRoot"
+          v-model:search-keyword="searchKeyword"
+          v-model:selected-filter="selectedFilter"
+          :is-multi-select-mode="isMultiSelectMode"
+          :selected-exe="selectedExe"
+          :is-scanning-folder="isScanningFolder"
+          :is-loading-games="isLoadingGames"
+          :is-fetching-images="imageFetchRunning"
+          :loaded-games-count="loadedGamesCount"
+          :total-games-count="totalGamesCount"
+          @pick-exe="pickExe"
+          @scan-folder="scanFolder"
+          @toggle-multi-select="toggleMultiSelect"
+          @select-all="selectAllGames"
+          @deselect-all="deselectAllGames"
+          @delete-selected="deleteSelectedGames"
+          @add-to-library="addSelectedToLibrary"
+          @toggle-selection="toggleGameSelection"
+          @open-detail="openGameDetail"
+          @launch="launchFromLibrary"
+          @close-game="closeGame"
+          @open-replace="openReplaceModal"
+          @delete-game="removeGame"
+          @image-downloaded="handleImageDownloaded"
+        />
       </div>
 
       <!-- 设置页面 -->
       <div v-else-if="activeTab === 'settings'">
-        <h1 style="margin:0 0 20px 0; font-size:20px; font-weight:500; color:#333;">设置</h1>
-        
-        <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
-          <label style="display:block; font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">Bangumi Access Token</label>
-          <div style="font-size:12px; color:#999; margin-bottom:10px;">
-            用于访问 NSFW 内容。在 <a href="https://bgm.tv/dev/app" target="_blank" style="color:#666; text-decoration:underline;">Bangumi 开发者页面</a> 获取。
-          </div>
-          <div style="display:flex; gap:8px;">
-            <div style="position:relative; flex:1;">
-              <input v-model="accessToken" 
-                     :type="showToken ? 'text' : 'password'"
-                     placeholder="输入 Access Token" 
-                     style="width:100%; padding:8px 40px 8px 12px; font-size:13px; box-sizing:border-box;" />
-              <button @click="showToken = !showToken" 
-                      style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:4px 8px; font-size:12px; background:transparent; border:1px solid #ddd; color:#666; cursor:pointer; transition:all 0.2s;"
-                      @mouseenter="$event.target.style.backgroundColor='#f0f0f0'; $event.target.style.borderColor='#999'"
-                      @mouseleave="$event.target.style.backgroundColor='transparent'; $event.target.style.borderColor='#ddd'">
-                {{ showToken ? '隐藏' : '显示' }}
-              </button>
-            </div>
-            <button @click="saveToken" style="padding:8px 16px; font-size:13px;">保存</button>
-          </div>
-        </div>
+        <Settings />
+      </div>
+
+      <!-- 关于页面 -->
+      <div v-else-if="activeTab === 'about'">
+        <About />
       </div>
     </section>
 
     <!-- 替换搜索模态框 -->
-    <div v-if="replaceModalVisible" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); z-index:80;">
-      <div style="width:70%; max-width:800px; max-height:80%; overflow:auto; background:#fff; padding:20px; border-radius:4px; border:1px solid #ddd;">
-        <h3 style="margin:0 0 16px 0; font-size:16px; font-weight:500; color:#333;">搜索并替换: {{ replaceTargetGame?.name }}</h3>
-        
-        <!-- 更换 EXE 文件区域 -->
-        <div style="margin-bottom:16px; padding:12px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
-          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-            <button @click="replaceExeFile" style="padding:6px 12px; font-size:12px; white-space:nowrap;">更换 EXE 文件</button>
-            <div style="flex:1; font-size:11px; color:#999;">更换游戏的可执行文件路径</div>
-          </div>
-          <div v-if="replaceTargetGame" style="font-size:11px; color:#666; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:4px 8px; background:#fff; border-radius:3px; border:1px solid #e0e0e0;" :title="replaceTargetGame.path">
-            当前: {{ replaceTargetGame.path }}
-          </div>
-        </div>
-        
-        <!-- 分割线 -->
-        <div style="height:1px; background:#e0e0e0; margin:16px 0;"></div>
-        
-        <!-- 搜索替换区域 -->
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:16px;">
-          <input v-model="replaceSearchKeyword" placeholder="输入关键词搜索" style="flex:1; padding:8px 12px; font-size:13px;" @keyup.enter="runReplaceSearch" />
-          <button @click="runReplaceSearch" style="padding:8px 16px; font-size:13px;">搜索</button>
-          <button @click="closeReplaceModal" style="padding:8px 16px; font-size:13px; background:#999;">关闭</button>
-        </div>
-        
-        <div v-if="replaceLoading" style="text-align:center; padding:30px; color:#999; font-size:13px;">搜索中...</div>
-        <div v-else-if="replaceResults.length === 0 && replaceSearchKeyword" style="text-align:center; padding:30px; color:#ccc; font-size:13px;">
-          没有找到相关结果
-        </div>
-        <div v-else style="display:grid; grid-template-columns: repeat(auto-fill, 140px); gap:12px;">
-          <div v-for="(it, i) in replaceResults" :key="it.id || i" 
-               style="width:140px; border:1px solid #e0e0e0; border-radius:4px; overflow:hidden; cursor:pointer; transition:all 0.2s; background:#fafafa;"
-               @click="selectReplaceItem(it)"
-               @mouseenter="$event.currentTarget.style.backgroundColor='#f5f5f5'; $event.currentTarget.style.borderColor='#ccc'"
-               @mouseleave="$event.currentTarget.style.backgroundColor='#fafafa'; $event.currentTarget.style.borderColor='#e0e0e0'">
-            <div style="width:140px; height:196px; position:relative; background:#f0f0f0; overflow:hidden;">
-              <img v-if="it.image || it.subject?.image || it.images?.large" 
-                   :src="it.image || it.subject?.image || it.images?.large || it.images?.medium || it.images?.small" 
-                   style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;" />
-              <div v-else style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:32px;">?</div>
-            </div>
-            <div style="padding:10px;">
-              <div style="font-weight:500; font-size:12px; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; line-clamp:2; -webkit-line-clamp:2; -webkit-box-orient:vertical; color:#333;">
-                {{ it.name_cn || it.name || it.title || it.subject?.name_cn || it.subject?.name || it.subject?.title }}
-              </div>
-              <div style="font-size:11px; color:#999;">ID: {{ it.id || it.subject?.id || 'N/A' }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ReplaceModal 
+      :visible="replaceModalVisible"
+      :target-game="replaceTargetGame"
+      :results="replaceResults"
+      :loading="replaceLoading"
+      @close="closeReplaceModal"
+      @search="runReplaceSearch"
+      @select="selectReplaceItem"
+      @replace-exe="replaceExeFile"
+    />
    
     <!-- 详情模态框 -->
-    <div v-if="detailModalVisible && detailData" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); z-index:90; padding:20px;">
-      <div style="width:90%; max-width:900px; max-height:90%; overflow:auto; background:#fff; border-radius:4px; border:1px solid #ddd; display:flex; flex-direction:column;">
-        <!-- 头部 -->
-        <div style="padding:20px; border-bottom:1px solid #e0e0e0; display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="margin:0; font-size:18px; font-weight:500; color:#333;">游戏详情</h3>
-          <button @click="closeDetailModal" 
-                  style="padding:6px 12px; font-size:13px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
-                  @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">关闭</button>
-        </div>
-        
-        <!-- 主体内容 -->
-        <div style="padding:20px; overflow-y:auto;">
-          <div style="display:flex; gap:20px; flex-wrap:wrap;">
-            <!-- 左侧封面 -->
-            <div style="flex-shrink:0;">
-              <img v-if="detailData.images?.large" :src="getImageSrc(detailData.images.large)" 
-                   style="width:240px; height:auto; border-radius:4px; border:1px solid #e0e0e0;" />
-              <div v-else style="width:240px; height:336px; background:#f0f0f0; border-radius:4px; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:48px;">?</div>
-            </div>
-            
-            <!-- 右侧信息 -->
-            <div style="flex:1; min-width:300px;">
-              <!-- 标题、运行状态和游戏时长 -->
-              <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:8px;">
-                <h2 style="margin:0; font-size:20px; font-weight:600; color:#333;">
-                  {{ detailData.name_cn || detailData.name }}
-                </h2>
-                <!-- 运行中状态 -->
-                <div v-if="detailGame && runningGames.has(detailGame.path)" 
-                     style="padding:4px 10px; background:rgba(76, 175, 80, 0.9); color:#fff; font-size:12px; font-weight:500; border-radius:3px; white-space:nowrap;">
-                  运行中
-                </div>
-                <div v-if="detailGame && detailGame.playtime > 0" style="font-size:14px; color:#666; white-space:nowrap;">
-                  ⏱ {{ formatPlaytime(detailGame.playtime) }}
-                </div>
-              </div>
-              <div v-if="detailData.name_cn && detailData.name" style="margin-bottom:4px; font-size:14px; color:#999;">
-                {{ detailData.name }}
-              </div>
-              <!-- 最后游玩时间 -->
-              <div v-if="detailGame && detailGame.last_played" style="margin-bottom:16px; font-size:12px; color:#999;">
-                最后游玩: {{ formatLastPlayed(detailGame.last_played) }}
-              </div>
-              <div v-else style="margin-bottom:16px;"></div>
-              
-              <!-- 基本信息 -->
-              <div style="background:#f8f9fa; padding:16px; border-radius:4px; margin-bottom:16px; border:1px solid #e0e0e0;">
-                <div style="display:grid; grid-template-columns:auto 1fr; gap:8px 16px; font-size:13px;">
-                  <div style="color:#666; font-weight:500;">ID:</div>
-                  <div style="color:#333;">{{ detailData.id }}</div>
-                  
-                  <div v-if="detailData.date" style="color:#666; font-weight:500;">发行日期:</div>
-                  <div v-if="detailData.date" style="color:#333;">{{ detailData.date }}</div>
-                  
-                  <div v-if="getInfoboxValue('中文名')" style="color:#666; font-weight:500;">中文名:</div>
-                  <div v-if="getInfoboxValue('中文名')" style="color:#333;">{{ getInfoboxValue('中文名') }}</div>
-                  
-                  <div v-if="getInfoboxValue('别名')" style="color:#666; font-weight:500;">别名:</div>
-                  <div v-if="getInfoboxValue('别名')" style="color:#333;">{{ getInfoboxValue('别名') }}</div>
-                  
-                  <div v-if="getInfoboxValue('平台')" style="color:#666; font-weight:500;">平台:</div>
-                  <div v-if="getInfoboxValue('平台')" style="color:#333;">{{ getInfoboxValue('平台') }}</div>
-                  
-                  <div v-if="getInfoboxValue('游戏类型')" style="color:#666; font-weight:500;">游戏类型:</div>
-                  <div v-if="getInfoboxValue('游戏类型')" style="color:#333;">{{ getInfoboxValue('游戏类型') }}</div>
-                  
-                  <div v-if="getInfoboxValue('开发')" style="color:#666; font-weight:500;">开发:</div>
-                  <div v-if="getInfoboxValue('开发')" style="color:#333;">{{ getInfoboxValue('开发') }}</div>
-                  
-                  <div v-if="getInfoboxValue('发行')" style="color:#666; font-weight:500;">发行:</div>
-                  <div v-if="getInfoboxValue('发行')" style="color:#333;">{{ getInfoboxValue('发行') }}</div>
-                </div>
-              </div>
-              
-              <!-- 标签 -->
-              <div v-if="detailData.meta_tags && detailData.meta_tags.length > 0" style="margin-bottom:16px;">
-                <div style="font-size:13px; font-weight:500; color:#666; margin-bottom:8px;">标签</div>
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                  <span v-for="tag in detailData.meta_tags" :key="tag" 
-                        style="padding:4px 10px; background:#f0f0f0; border-radius:3px; font-size:11px; color:#666; border:1px solid #e0e0e0;">
-                    {{ tag }}
-                  </span>
-                </div>
-              </div>
-              
-              <!-- 简介 -->
-              <div v-if="detailData.summary" style="margin-bottom:16px;">
-                <div style="font-size:13px; font-weight:500; color:#666; margin-bottom:8px;">简介</div>
-                <div style="font-size:13px; color:#333; line-height:1.6; white-space:pre-wrap;">{{ detailData.summary }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 底部操作栏 -->
-        <div style="padding:16px 20px; border-top:1px solid #e0e0e0; display:flex; gap:8px; justify-content:flex-end; background:#f8f9fa;">
-          <!-- 运行中时显示关闭按钮（红色），否则显示启动按钮（绿色） -->
-          <button v-if="detailGame && runningGames.has(detailGame.path)" 
-                  @click="closeGame(detailGame.path)" 
-                  style="padding:8px 20px; font-size:13px; background:#f44336; border:1px solid #f44336; color:#fff; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#d32f2f'; $event.target.style.borderColor='#d32f2f'"
-                  @mouseleave="$event.target.style.backgroundColor='#f44336'; $event.target.style.borderColor='#f44336'">
-            关闭游戏
-          </button>
-          <button v-else-if="detailGame" 
-                  @click="launchFromLibrary(detailGame)" 
-                  style="padding:8px 20px; font-size:13px; background:#4CAF50; border:1px solid #4CAF50; color:#fff; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#45a049'; $event.target.style.borderColor='#45a049'"
-                  @mouseleave="$event.target.style.backgroundColor='#4CAF50'; $event.target.style.borderColor='#4CAF50'">
-            启动游戏
-          </button>
-          <button v-if="detailGame" @click="async () => { if (await removeGame(detailGame)) closeDetailModal() }" 
-                  style="padding:8px 20px; font-size:13px; background:#fff; border:1px solid #ddd; color:#999; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
-                  @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">
-            删除游戏
-          </button>
-        </div>
-      </div>
-    </div>
+    <GameDetailModal 
+      :visible="detailModalVisible"
+      :detail-data="detailData"
+      :game="detailGame"
+      :is-running="detailGame && runningGames.has(detailGame.path)"
+      :image-src="detailData && detailData.images?.large ? getImageSrc(detailData.images.large) : ''"
+      @close="closeDetailModal"
+      @launch-game="launchFromLibrary(detailGame)"
+      @close-game="closeGame(detailGame.path)"
+      @delete-game="async () => { if (await removeGame(detailGame)) closeDetailModal() }"
+    />
 
     <!-- 扫描结果模态框 -->
     <div v-if="scannedGames.length > 0" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); z-index:90; padding:20px;">
@@ -1459,17 +1100,6 @@ function getInfoboxValue(key) {
 </template>
 
 <style scoped>
-/* 侧边栏按钮样式 */
-aside button:hover {
-  background-color: #f0f0f0;
-}
-
-aside button.active {
-  background-color: #e8e8e8;
-  border-left-color: #666 !important;
-  font-weight: 500;
-}
-
 /* Toast 动画 */
 @keyframes fadeIn {
   from {

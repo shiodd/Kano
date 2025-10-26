@@ -102,12 +102,16 @@ fn kill_game(path: String, state: State<'_, RunningProcesses>) -> Result<(), Str
 struct GameEntry {
     name: String,
     path: String,
-    image: Option<String>,
+    image: Option<String>,       // 本地图片路径
+    #[serde(default)]
+    image_url: Option<String>,   // 网络图片URL
     subject_id: Option<i64>,
     #[serde(default)]
     playtime: i64, // 总游戏时长（秒）
     #[serde(default)]
     last_played: Option<String>, // 上次游玩时间 (ISO 8601 格式)
+    #[serde(default)]
+    folder_path: Option<Vec<String>>, // 从用户选择的文件夹开始的文件夹路径
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -256,7 +260,7 @@ fn save_games_db(db: &GamesDB) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_game(path: &str, name: Option<&str>) -> Result<GameEntry, String> {
+fn add_game(path: &str, name: Option<&str>, folder_path: Option<Vec<String>>) -> Result<GameEntry, String> {
     let p = PathBuf::from(path);
     if !p.exists() || !p.is_file() {
         return Err("path not found or not a file".into());
@@ -270,9 +274,11 @@ fn add_game(path: &str, name: Option<&str>) -> Result<GameEntry, String> {
         name: nm,
         path: p.to_string_lossy().to_string(),
         image: None,
+        image_url: None,
         subject_id: None,
         playtime: 0,
         last_played: None,
+        folder_path,
     };
     let mut db = load_games_db();
     // avoid duplicates
@@ -304,7 +310,7 @@ fn update_game_image(path: &str, image: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_game_info(path: &str, name: Option<&str>, image: Option<&str>, subject_id: Option<i64>) -> Result<serde_json::Value, String> {
+fn update_game_info(path: &str, name: Option<&str>, image: Option<&str>, image_url: Option<&str>, subject_id: Option<i64>) -> Result<serde_json::Value, String> {
     let mut db = load_games_db();
     let mut found = false;
     let mut updated_entry: Option<GameEntry> = None;
@@ -319,6 +325,9 @@ fn update_game_info(path: &str, name: Option<&str>, image: Option<&str>, subject
             }
             if let Some(img) = image {
                 g.image = Some(img.to_string());
+            }
+            if let Some(url) = image_url {
+                g.image_url = Some(url.to_string());
             }
             if let Some(sid) = subject_id {
                 g.subject_id = Some(sid);
@@ -410,7 +419,8 @@ pub fn run() {
             save_cache,
             download_image,
             get_project_root,
-            delete_cached_image
+            delete_cached_image,
+            test_network_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -445,16 +455,20 @@ fn pick_folder_and_scan() -> Result<Vec<serde_json::Value>, String> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        // Find the first .exe file in this folder
-                        if let Some(exe_path) = find_first_exe_in_folder(&path) {
+                        // Recursively find exe in this folder and its subfolders
+                        if let Some((exe_path, mut folder_names)) = find_exe_with_folder_path(&path) {
                             let folder_name = path.file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("Unknown")
                                 .to_string();
                             
+                            // 在路径前面插入游戏文件夹自己的名字（用户选择文件夹下的第一层）
+                            folder_names.insert(0, folder_name.clone());
+                            
                             games.push(serde_json::json!({
                                 "path": exe_path,
-                                "name": folder_name
+                                "name": folder_name,
+                                "folder_path": folder_names  // 从用户选择的文件夹开始的完整路径
                             }));
                         }
                     }
@@ -464,6 +478,66 @@ fn pick_folder_and_scan() -> Result<Vec<serde_json::Value>, String> {
             Ok(games)
         }
         None => Err("cancelled".into()),
+    }
+}
+
+// Find exe and return the exe path along with all folder names from the start folder to exe location
+fn find_exe_with_folder_path(start_folder: &PathBuf) -> Option<(String, Vec<String>)> {
+    let mut all_exes = Vec::new();
+    
+    // Collect all exe files recursively with their paths
+    collect_exe_files_with_path(start_folder, start_folder, &mut all_exes);
+    
+    if all_exes.is_empty() {
+        return None;
+    }
+    
+    // Prioritize exe files with Chinese keywords
+    let chinese_keywords = ["ch", "chs", "cn", "中文", "chinese", "简体", "繁体", "汉化"];
+    
+    for (exe_path, folder_names) in &all_exes {
+        let file_name = exe_path.to_lowercase();
+        for keyword in &chinese_keywords {
+            if file_name.contains(keyword) {
+                return Some((exe_path.clone(), folder_names.clone()));
+            }
+        }
+    }
+    
+    // If no Chinese version found, return the first exe
+    all_exes.into_iter().next()
+}
+
+// Collect exe files with their relative folder path from start_folder
+fn collect_exe_files_with_path(start_folder: &PathBuf, current_folder: &PathBuf, result: &mut Vec<(String, Vec<String>)>) {
+    if let Ok(entries) = fs::read_dir(current_folder) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("exe") {
+                        // Extract folder names from start_folder to exe location
+                        let mut folder_names = Vec::new();
+                        
+                        // Get the relative path from start_folder to exe's parent
+                        if let Some(exe_parent) = path.parent() {
+                            if let Ok(relative_path) = exe_parent.strip_prefix(start_folder) {
+                                // Convert relative path to folder names
+                                for component in relative_path.components() {
+                                    if let Some(name) = component.as_os_str().to_str() {
+                                        folder_names.push(name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        
+                        result.push((path.to_string_lossy().to_string(), folder_names));
+                    }
+                }
+            } else if path.is_dir() {
+                collect_exe_files_with_path(start_folder, &path, result);
+            }
+        }
     }
 }
 
@@ -674,4 +748,30 @@ fn delete_cached_image(subject_id: i64) -> Result<(), String> {
     
     // Image not found, but that's okay
     Ok(())
+}
+
+// Test network connectivity to bgm.tv and return latency
+#[tauri::command]
+fn test_network_connection() -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    
+    let start = std::time::Instant::now();
+    match client.get("https://bgm.tv").send() {
+        Ok(_) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            Ok(serde_json::json!({
+                "success": true,
+                "latency": latency_ms
+            }))
+        },
+        Err(_) => {
+            Ok(serde_json::json!({
+                "success": false,
+                "latency": null
+            }))
+        },
+    }
 }

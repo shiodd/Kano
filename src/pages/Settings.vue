@@ -28,31 +28,74 @@
     <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
       <label style="display:block; font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">网络连接测试</label>
       <div style="font-size:12px; color:#999; margin-bottom:10px;">
-        测试与 Bangumi 的网络连接是否正常
+        测试与 Bangumi 的网络连接和 API 访问是否正常
       </div>
-      <div style="display:flex; align-items:center; gap:12px;">
+      <div style="display:flex; flex-direction:column; gap:12px;">
         <button @click="testNetwork" 
                 :disabled="isTesting"
-                style="padding:8px 16px; font-size:13px;">
+                style="padding:8px 16px; font-size:13px; align-self:flex-start;">
           {{ isTesting ? '检测中...' : '测试连接' }}
         </button>
-        <div v-if="networkStatus !== null" style="display:flex; align-items:center; gap:8px;">
-          <div :style="{
-            width: '10px',
-            height: '10px',
-            borderRadius: '50%',
-            backgroundColor: networkStatus ? '#4CAF50' : '#f44336'
-          }"></div>
-          <span :style="{
-            fontSize: '13px',
-            color: networkStatus ? '#4CAF50' : '#f44336',
-            fontWeight: '500'
-          }">
-            {{ networkStatus ? 'Bangumi 连接正常' : 'Bangumi 无法连接' }}
-          </span>
-          <span v-if="networkStatus && latency !== null" style="font-size:12px; color:#999;">
-            ({{ latency }}ms)
-          </span>
+        
+        <!-- 测试结果 -->
+        <div v-if="testResult !== null" style="display:flex; flex-direction:column; gap:8px;">
+          <!-- 基础连接 -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div :style="{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              backgroundColor: testResult.success ? '#4CAF50' : '#f44336'
+            }"></div>
+            <span :style="{
+              fontSize: '13px',
+              color: testResult.success ? '#4CAF50' : '#f44336',
+              fontWeight: '500'
+            }">
+              Bangumi 网页连接{{ testResult.success ? '正常' : '失败' }}
+            </span>
+            <span v-if="testResult.success && testResult.latency !== null" style="font-size:12px; color:#999;">
+              ({{ testResult.latency }}ms)
+            </span>
+          </div>
+          
+          <!-- 普通游戏 API -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div :style="{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              backgroundColor: testResult.normalGameApi ? '#4CAF50' : '#f44336'
+            }"></div>
+            <span :style="{
+              fontSize: '13px',
+              color: testResult.normalGameApi ? '#4CAF50' : '#f44336'
+            }">
+              普通 {{ testResult.normalGameApi ? '正常' : '失败' }}
+            </span>
+            <span v-if="testResult.normalGameApi && testResult.normalGameLatency !== null" style="font-size:12px; color:#999;">
+              ({{ testResult.normalGameLatency }}ms)
+            </span>
+          </div>
+          
+          <!-- NSFW 游戏 API -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div :style="{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              backgroundColor: testResult.nsfwGameApi ? '#4CAF50' : '#f44336'
+            }"></div>
+            <span :style="{
+              fontSize: '13px',
+              color: testResult.nsfwGameApi ? '#4CAF50' : '#f44336'
+            }">
+              NSFW {{ testResult.nsfwGameApi ? '正常' : '失败' }}
+            </span>
+            <span v-if="testResult.nsfwGameApi && testResult.nsfwGameLatency !== null" style="font-size:12px; color:#999;">
+              ({{ testResult.nsfwGameLatency }}ms)
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -66,8 +109,7 @@ import { invoke } from '@tauri-apps/api/core';
 const accessToken = ref('');
 const showToken = ref(false);
 const isTesting = ref(false);
-const networkStatus = ref(null); // null: 未测试, true: 正常, false: 失败
-const latency = ref(null); // 延迟时间（毫秒）
+const testResult = ref(null); // 存储完整的测试结果
 
 async function loadToken() {
   try {
@@ -89,16 +131,20 @@ async function saveToken() {
 
 async function testNetwork() {
   isTesting.value = true;
-  networkStatus.value = null;
-  latency.value = null;
+  testResult.value = null;
   
   try {
     const result = await invoke('test_network_connection');
-    networkStatus.value = result.success;
-    latency.value = result.latency;
+    testResult.value = result;
   } catch (e) {
-    networkStatus.value = false;
-    latency.value = null;
+    testResult.value = {
+      success: false,
+      latency: null,
+      normalGameApi: false,
+      normalGameLatency: null,
+      nsfwGameApi: false,
+      nsfwGameLatency: null
+    };
   } finally {
     isTesting.value = false;
   }

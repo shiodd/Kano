@@ -1,12 +1,12 @@
 <template>
-  <div>
+  <div @click="showMenu = false; showFilterMenu = false">
     <!-- 标题栏 -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div style="display:flex; gap:12px; align-items:center; flex:1;">
         <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
         
         <!-- 搜索框 -->
-        <div style="flex:1; max-width:300px;">
+        <div style="flex:1; max-width:200px;">
           <input :value="searchKeyword" 
                  @input="$emit('update:searchKeyword', $event.target.value)"
                  placeholder="搜索游戏..." 
@@ -15,82 +15,116 @@
                  @blur="$event.target.style.borderColor='#e0e0e0'" />
         </div>
         
-        <!-- 筛选按钮 -->
-        <div style="display:flex; gap:4px; align-items:center; padding:4px; background:#fff; border-radius:4px; border:1px solid #e0e0e0;">
-          <button v-for="filter in filters" :key="filter"
-                  @click="$emit('update:selectedFilter', filter)" 
-                  :style="{
-                    padding: '4px 12px',
-                    fontSize: '12px',
-                    background: selectedFilter === filter ? '#e8e8e8' : '#fff',
-                    border: selectedFilter === filter ? '1px solid #999' : '1px solid #ddd',
-                    color: selectedFilter === filter ? '#333' : '#666',
-                    fontWeight: selectedFilter === filter ? '500' : '400',
-                    borderRadius: '3px',
-                    cursor: 'pointer'
-                  }">
-            {{ filter }}
+        <!-- 筛选下拉框 -->
+        <div style="position:relative;">
+          <button @click.stop="showFilterMenu = !showFilterMenu" 
+                  style="padding:6px 12px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
+                  @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
+                  @mouseleave="$event.target.style.backgroundColor='#fff'">
+            {{ selectedFilter }} ▼
           </button>
+          
+          <!-- 筛选菜单 -->
+          <div v-if="showFilterMenu" 
+               @click.stop
+               style="position:absolute; top:100%; left:0; margin-top:4px; background:#fff; border:1px solid #e0e0e0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:100; min-width:100px;">
+            <button v-for="filter in filters" :key="filter"
+                    @click="$emit('update:selectedFilter', filter); showFilterMenu = false" 
+                    :style="{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      background: selectedFilter === filter ? '#f5f5f5' : '#fff',
+                      border: 'none',
+                      color: '#333',
+                      fontWeight: selectedFilter === filter ? '500' : '400',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }"
+                    @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                    @mouseleave="$event.target.style.backgroundColor = selectedFilter === filter ? '#f5f5f5' : '#fff'">
+              {{ filter }}
+            </button>
+          </div>
         </div>
+        
         <div style="font-size:12px; color:#999;">
           {{ filteredGames.length }} / {{ games.length }}
         </div>
       </div>
       
       <!-- 右上角菜单 -->
-      <div style="position:relative;">
-        <button @click.stop="showMenu = !showMenu" 
-                style="padding:8px 16px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
-                @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
-                @mouseleave="$event.target.style.backgroundColor='#fff'">
-          操作 ▼
+      <div style="display:flex; gap:8px; align-items:center;">
+        <!-- 多选模式下的操作按钮 -->
+        <template v-if="isMultiSelectMode">
+          <button @click="isAllSelected ? $emit('deselect-all') : $emit('select-all')" 
+                  style="padding:8px 16px; font-size:13px; white-space:nowrap;"
+                  @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
+                  @mouseleave="$event.target.style.backgroundColor='#fff'">
+            {{ isAllSelected ? '取消全选' : '全选' }}
+          </button>
+          <button @click="$emit('delete-selected')" 
+                  :disabled="selectedGames.size === 0"
+                  :style="{
+                    padding: '8px 16px',
+                    fontSize: '13px',
+                    whiteSpace: 'nowrap',
+                    color: selectedGames.size > 0 ? '#f44336' : '#999',
+                    cursor: selectedGames.size > 0 ? 'pointer' : 'not-allowed',
+                    opacity: selectedGames.size > 0 ? 1 : 0.5
+                  }"
+                  @mouseenter="selectedGames.size > 0 ? $event.target.style.backgroundColor='#ffebee' : null"
+                  @mouseleave="$event.target.style.backgroundColor='#fff'">
+            删除选中 {{ selectedGames.size > 0 ? `(${selectedGames.size})` : '' }}
+          </button>
+        </template>
+        
+        <!-- 多选按钮（固定位置） -->
+        <button @click.stop="$emit('toggle-multi-select')" 
+                :style="{
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  background: isMultiSelectMode ? '#e8f5e9' : '#fff',
+                  borderColor: isMultiSelectMode ? '#4CAF50' : '#ccc',
+                  color: isMultiSelectMode ? '#2e7d32' : '#333'
+                }"
+                @mouseenter="$event.target.style.backgroundColor = isMultiSelectMode ? '#c8e6c9' : '#f0f0f0'"
+                @mouseleave="$event.target.style.backgroundColor = isMultiSelectMode ? '#e8f5e9' : '#fff'">
+          {{ isMultiSelectMode ? `多选 (${selectedGames.size})` : '多选' }}
         </button>
         
-        <!-- 下拉菜单 -->
-        <div v-if="showMenu" 
-             @click.stop
-             style="position:absolute; top:100%; right:0; margin-top:4px; background:#fff; border:1px solid #e0e0e0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:100; min-width:160px;">
-          <button @click="$emit('pick-exe'); showMenu = false" 
-                  style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+        <!-- 操作菜单 -->
+        <div style="position:relative;">
+          <button @click.stop="showMenu = !showMenu" 
+                  style="padding:8px 16px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
+                  @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
                   @mouseleave="$event.target.style.backgroundColor='#fff'">
-            选择游戏
+            操作 ▼
           </button>
-          <button @click="$emit('scan-folder'); showMenu = false" 
-                  :disabled="isScanningFolder"
-                  style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                  @mouseleave="$event.target.style.backgroundColor='#fff'">
-            {{ isScanningFolder ? '扫描中...' : '扫描文件夹' }}
-          </button>
-          <div style="height:1px; background:#e0e0e0; margin:4px 0;"></div>
-          <button @click="$emit('toggle-multi-select'); showMenu = false" 
-                  style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
-                  @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                  @mouseleave="$event.target.style.backgroundColor='#fff'">
-            {{ isMultiSelectMode ? '退出多选模式' : '多选模式' }}
-          </button>
-          <template v-if="isMultiSelectMode">
-            <button @click="$emit('select-all'); showMenu = false" 
+          
+          <!-- 下拉菜单 -->
+          <div v-if="showMenu" 
+               @click.stop
+               style="position:absolute; top:100%; right:0; margin-top:4px; background:#fff; border:1px solid #e0e0e0; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:100; min-width:160px;">
+            <button @click="$emit('pick-exe'); showMenu = false" 
                     style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
                     @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
                     @mouseleave="$event.target.style.backgroundColor='#fff'">
-              全选
+              选择游戏
             </button>
-            <button @click="$emit('deselect-all'); showMenu = false" 
+            <button @click="$emit('scan-folder'); showMenu = false" 
+                    :disabled="isScanningFolder"
                     style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#333; cursor:pointer; transition:all 0.2s;"
                     @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
                     @mouseleave="$event.target.style.backgroundColor='#fff'">
-              取消全选
+              {{ isScanningFolder ? '扫描中...' : '扫描文件夹' }}
             </button>
-            <button @click="$emit('delete-selected'); showMenu = false" 
-                    :disabled="selectedGames.size === 0"
-                    style="width:100%; text-align:left; padding:10px 16px; font-size:13px; background:#fff; border:none; color:#f44336; cursor:pointer; transition:all 0.2s;"
-                    @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
-                    @mouseleave="$event.target.style.backgroundColor='#fff'">
-              删除选中 {{ selectedGames.size > 0 ? `(${selectedGames.size})` : '' }}
-            </button>
-          </template>
+          </div>
         </div>
       </div>
     </div>
@@ -151,7 +185,7 @@
 </template>
 
 <script setup>
-import { ref, inject } from 'vue';
+import { ref, inject, computed } from 'vue';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import GameCard from '../components/GameCard.vue';
 
@@ -235,6 +269,13 @@ defineEmits([
 
 const filters = ['全部', 'ADV', 'RPG'];
 const showMenu = ref(false);
+const showFilterMenu = ref(false);
+
+// 判断是否已全选
+const isAllSelected = computed(() => {
+  if (props.filteredGames.length === 0) return false;
+  return props.filteredGames.every(game => props.selectedGames.has(game.path));
+});
 
 // Helper function to get image source
 function getImageSrc(imagePath) {

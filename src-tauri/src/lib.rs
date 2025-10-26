@@ -755,23 +755,61 @@ fn delete_cached_image(subject_id: i64) -> Result<(), String> {
 fn test_network_connection() -> Result<serde_json::Value, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
+        .user_agent("testGalManager/1.0")
         .build()
         .map_err(|e| e.to_string())?;
     
+    // 获取 access token
+    let token = load_config().access_token;
+    
+    // 测试基础连接
     let start = std::time::Instant::now();
-    match client.get("https://bgm.tv").send() {
-        Ok(_) => {
-            let latency_ms = start.elapsed().as_millis() as u64;
-            Ok(serde_json::json!({
-                "success": true,
-                "latency": latency_ms
-            }))
-        },
-        Err(_) => {
-            Ok(serde_json::json!({
-                "success": false,
-                "latency": null
-            }))
-        },
+    let base_result = client.get("https://bgm.tv").send();
+    let base_ok = base_result.is_ok();
+    let base_latency = if base_ok { Some(start.elapsed().as_millis() as u64) } else { None };
+    
+    // 测试普通游戏 API (ID: 2288)
+    let start = std::time::Instant::now();
+    let mut normal_request = client.get("https://api.bgm.tv/v0/subjects/2288")
+        .header("User-Agent", "testGalManager/1.0");
+    
+    if let Some(ref t) = token {
+        if !t.is_empty() {
+            normal_request = normal_request.header("Authorization", format!("Bearer {}", t));
+        }
     }
+    
+    let normal_game_result = normal_request.send();
+    let normal_game_ok = match normal_game_result {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false
+    };
+    let normal_game_latency = if normal_game_ok { Some(start.elapsed().as_millis() as u64) } else { None };
+    
+    // 测试 NSFW 游戏 API (ID: 165894) - 需要 token
+    let start = std::time::Instant::now();
+    let mut nsfw_request = client.get("https://api.bgm.tv/v0/subjects/165894")
+        .header("User-Agent", "testGalManager/1.0");
+    
+    if let Some(ref t) = token {
+        if !t.is_empty() {
+            nsfw_request = nsfw_request.header("Authorization", format!("Bearer {}", t));
+        }
+    }
+    
+    let nsfw_game_result = nsfw_request.send();
+    let nsfw_game_ok = match nsfw_game_result {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false
+    };
+    let nsfw_game_latency = if nsfw_game_ok { Some(start.elapsed().as_millis() as u64) } else { None };
+    
+    Ok(serde_json::json!({
+        "success": base_ok,
+        "latency": base_latency,
+        "normalGameApi": normal_game_ok,
+        "normalGameLatency": normal_game_latency,
+        "nsfwGameApi": nsfw_game_ok,
+        "nsfwGameLatency": nsfw_game_latency
+    }))
 }

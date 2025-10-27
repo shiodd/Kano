@@ -12,16 +12,15 @@ pub fn get_access_token() -> Result<Option<String>, String> {
     Ok(load_config().access_token)
 }
 
-// Get the project root directory (parent of src-tauri)
+// Get the project root directory (exe directory)
 #[tauri::command]
 pub fn get_project_root() -> Result<String, String> {
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let root = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
-    Ok(root.to_string_lossy().to_string())
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe_path| exe_path.parent().map(|p| p.to_path_buf()))
+        .ok_or("Failed to get exe directory")?;
+    
+    Ok(exe_dir.to_string_lossy().to_string())
 }
 
 // Test network connectivity to bgm.tv and return latency

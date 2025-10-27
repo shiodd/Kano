@@ -285,11 +285,16 @@ function getImageSrc(imagePath) {
     return imagePath;
   }
   // 如果是相对路径（game_data/images/...），转换为绝对路径
-  if (imagePath.startsWith('game_data/')) {
-    const absolutePath = `${props.projectRoot}\\${imagePath.replace(/\//g, '\\\\')}`;
+  if (imagePath.startsWith('game_data/') || imagePath.startsWith('game_data\\')) {
+    const normalizedPath = imagePath.replace(/\//g, '\\');
+    const absolutePath = `${props.projectRoot}\\${normalizedPath}`;
     return convertFileSrc(absolutePath);
   }
-  // 其他情况（绝对路径）直接转换
+  // 如果是绝对路径（Windows: C:\... 或 其他盘符）- 为了兼容性保留
+  if (/^[a-zA-Z]:\\/.test(imagePath)) {
+    return convertFileSrc(imagePath);
+  }
+  // 其他情况直接转换
   return convertFileSrc(imagePath);
 }
 

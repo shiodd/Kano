@@ -39,7 +39,8 @@ pub fn run() {
             download_image,
             get_project_root,
             delete_cached_image,
-            test_network_connection
+            test_network_connection,
+            get_app_data_paths
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

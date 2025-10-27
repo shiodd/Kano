@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-# Kano - Galgame 管理器
+# Kano
 
 <div align="center">
   <img src="src-tauri/icons/128x128.png" alt="Kano Logo" width="128" height="128">

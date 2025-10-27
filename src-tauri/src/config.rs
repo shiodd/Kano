@@ -2,43 +2,60 @@ use std::fs;
 use std::path::PathBuf;
 use crate::models::{AppConfig, GamesDB};
 
-// Get the directory where the exe file is located
-fn get_app_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe_path| exe_path.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()))
-}
-
 pub fn games_db_path() -> PathBuf {
-    let mut p = get_app_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let mut p = if let Some(parent) = cwd.parent() {
+        parent.to_path_buf()
+    } else {
+        cwd
+    };
     p.push("game_data");
     p.push("games_db.json");
     p
 }
 
 pub fn config_path() -> PathBuf {
-    let mut p = get_app_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let mut p = if let Some(parent) = cwd.parent() {
+        parent.to_path_buf()
+    } else {
+        cwd
+    };
     p.push("tauri_config.json");
     p
 }
 
 pub fn cache_path() -> PathBuf {
-    let mut p = get_app_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let mut p = if let Some(parent) = cwd.parent() {
+        parent.to_path_buf()
+    } else {
+        cwd
+    };
     p.push("game_data");
     p.push("bangumi_cache.json");
     p
 }
 
 pub fn images_dir_path() -> PathBuf {
-    let mut p = get_app_dir();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let mut p = if let Some(parent) = cwd.parent() {
+        parent.to_path_buf()
+    } else {
+        cwd
+    };
     p.push("game_data");
     p.push("images");
     p
 }
 
 pub fn project_root() -> PathBuf {
-    get_app_dir()
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    if let Some(parent) = cwd.parent() {
+        parent.to_path_buf()
+    } else {
+        cwd
+    }
 }
 
 pub fn load_config() -> AppConfig {

@@ -5,6 +5,15 @@
       <div style="display:flex; gap:12px; align-items:center; flex:1;">
         <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
         
+        <!-- 当前标签筛选提示 -->
+        <div v-if="selectedTag" style="display:flex; align-items:center; gap:8px; padding:4px 12px; background:#e3f2fd; border:1px solid #90caf9; border-radius:4px;">
+          <span style="font-size:13px; color:#1976d2;">{{ selectedTag }}</span>
+          <button @click="$emit('clear-tag-filter')" 
+                  style="padding:2px 6px; font-size:11px; background:transparent; border:none; color:#1976d2; cursor:pointer; font-weight:bold;">
+            ×
+          </button>
+        </div>
+        
         <!-- 搜索框 -->
         <div style="flex:1; max-width:200px;">
           <input :value="searchKeyword" 
@@ -214,6 +223,10 @@ const props = defineProps({
     type: String,
     default: '全部'
   },
+  selectedTag: {
+    type: String,
+    default: null
+  },
   isMultiSelectMode: {
     type: Boolean,
     default: false
@@ -285,16 +298,11 @@ function getImageSrc(imagePath) {
     return imagePath;
   }
   // 如果是相对路径（game_data/images/...），转换为绝对路径
-  if (imagePath.startsWith('game_data/') || imagePath.startsWith('game_data\\')) {
-    const normalizedPath = imagePath.replace(/\//g, '\\');
-    const absolutePath = `${props.projectRoot}\\${normalizedPath}`;
+  if (imagePath.startsWith('game_data/')) {
+    const absolutePath = `${props.projectRoot}\\${imagePath.replace(/\//g, '\\\\')}`;
     return convertFileSrc(absolutePath);
   }
-  // 如果是绝对路径（Windows: C:\... 或 其他盘符）- 为了兼容性保留
-  if (/^[a-zA-Z]:\\/.test(imagePath)) {
-    return convertFileSrc(imagePath);
-  }
-  // 其他情况直接转换
+  // 其他情况（绝对路径）直接转换
   return convertFileSrc(imagePath);
 }
 

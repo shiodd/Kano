@@ -117,7 +117,7 @@ pub async fn download_image(url: &str, subject_id: i64) -> Result<String, String
     
     fs::write(&image_path, bytes).map_err(|e| e.to_string())?;
     
-    // Return the relative path (relative to exe directory)
+    // Return the relative path for easier portability
     Ok(format!("game_data/images/{}", filename))
 }
 

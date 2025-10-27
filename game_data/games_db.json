@@ -1,58 +1,5 @@
 {
-  "games": [
-    {
-      "name": "妹调教日记",
-      "path": "E:\\BaiduNetdiskDownload\\gal\\妹调教日记\\imouto_CHS（win10兼容）.exe",
-      "image": "game_data/images/23604.jpg",
-      "image_url": "https://lain.bgm.tv/pic/cover/l/5e/7a/23604_2Ah47.jpg",
-      "subject_id": 23604,
-      "playtime": 20,
-      "last_played": "2025-10-27T13:46:53.333Z",
-      "folder_path": [
-        "妹调教日记"
-      ],
-      "tags": []
-    },
-    {
-      "name": "妹调教日记√happy end & another",
-      "path": "E:\\BaiduNetdiskDownload\\gal\\妹调教日记FD\\imoutoFD_CHS（win10兼容）.exe",
-      "image": "game_data/images/79920.jpg",
-      "image_url": "https://lain.bgm.tv/pic/cover/l/83/49/79920_r0Xqn.jpg",
-      "subject_id": 79920,
-      "playtime": 50,
-      "last_played": "2025-10-27T13:47:47.479Z",
-      "folder_path": [
-        "妹调教日记FD"
-      ],
-      "tags": []
-    },
-    {
-      "name": "幸福噩梦",
-      "path": "E:\\BaiduNetdiskDownload\\gal\\幸福噩梦\\cmvsCheck32.exe",
-      "image": "game_data/images/48010.jpg",
-      "image_url": "https://lain.bgm.tv/pic/cover/l/26/7d/48010_69v9i.jpg",
-      "subject_id": 48010,
-      "playtime": 0,
-      "last_played": null,
-      "folder_path": [
-        "幸福噩梦"
-      ],
-      "tags": []
-    },
-    {
-      "name": "幸福噩梦 Fragmentation Dream",
-      "path": "E:\\BaiduNetdiskDownload\\gal\\幸福噩梦FDv1.04(少部分未汉)\\cmvs32_cn.exe",
-      "image": "game_data/images/85349.jpg",
-      "image_url": "https://lain.bgm.tv/pic/cover/l/e3/62/85349_ZWC5g.jpg",
-      "subject_id": 85349,
-      "playtime": 0,
-      "last_played": "2025-10-27T13:48:14.598Z",
-      "folder_path": [
-        "幸福噩梦FDv1.04(少部分未汉)"
-      ],
-      "tags": []
-    }
-  ],
+  "games": [],
   "custom_tags": [
     "未玩",
     "正在玩",

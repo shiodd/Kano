@@ -4,7 +4,10 @@
     
     <div style="max-width:600px; margin:0 auto; padding:40px 20px;">
       <div style="text-align:center; margin-bottom:40px;">
-        <h2 style="margin:0 0 8px 0; font-size:24px; font-weight:600; color:#333;">Kano</h2>
+        <div style="display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:8px;">
+          <img src="/icon.png" alt="Kano" style="width:48px; height:48px; border-radius:8px;" />
+          <h2 style="margin:0; font-size:24px; font-weight:600; color:#333;">Kano</h2>
+        </div>
       </div>
       
       <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:24px;">

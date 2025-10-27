@@ -71,7 +71,7 @@
               fontSize: '13px',
               color: testResult.normalGameApi ? '#4CAF50' : '#f44336'
             }">
-              普通 {{ testResult.normalGameApi ? '正常' : '失败' }}
+              普通内容api {{ testResult.normalGameApi ? '正常' : '失败' }}
             </span>
             <span v-if="testResult.normalGameApi && testResult.normalGameLatency !== null" style="font-size:12px; color:#999;">
               ({{ testResult.normalGameLatency }}ms)
@@ -90,7 +90,7 @@
               fontSize: '13px',
               color: testResult.nsfwGameApi ? '#4CAF50' : '#f44336'
             }">
-              NSFW {{ testResult.nsfwGameApi ? '正常' : '失败' }}
+              完整游戏api {{ testResult.nsfwGameApi ? '正常' : '失败' }}
             </span>
             <span v-if="testResult.nsfwGameApi && testResult.nsfwGameLatency !== null" style="font-size:12px; color:#999;">
               ({{ testResult.nsfwGameLatency }}ms)

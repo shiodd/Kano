@@ -5,6 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from './pages/Settings.vue';
 import About from './pages/About.vue';
+import TagManagement from './pages/TagManagement.vue';
 import Sidebar from './components/Sidebar.vue';
 import GameLibrary from './pages/GameLibrary.vue';
 import GameDetailModal from './components/GameDetailModal.vue';
@@ -131,10 +132,18 @@ const toastVisible = ref(false);
 // Filter state
 const selectedFilter = ref('全部'); // '全部', 'ADV', 'RPG'
 const searchKeyword = ref(''); // 搜索关键词
+const selectedTag = ref(null); // 选中的标签
 
 // Computed filtered games
 const filteredGames = computed(() => {
   let result = games.value;
+  
+  // Apply tag filter (优先级最高)
+  if (selectedTag.value) {
+    result = result.filter(game => {
+      return game.tags && game.tags.includes(selectedTag.value);
+    });
+  }
   
   // Apply type filter
   if (selectedFilter.value !== '全部') {
@@ -965,12 +974,42 @@ function getInfoboxValue(key) {
   }
   return item.value;
 }
+
+// 标签相关处理
+const sidebarRef = ref(null);
+const tagManagementRef = ref(null);
+
+function handleTagSelected(tag) {
+  // 点击标签时，如果已选中该标签则取消，否则选中
+  if (selectedTag.value === tag) {
+    selectedTag.value = null;
+  } else {
+    selectedTag.value = tag;
+  }
+  // 确保在游戏库页面
+  if (activeTab.value !== 'library') {
+    activeTab.value = 'library';
+  }
+}
+
+async function handleTagsUpdated() {
+  // 刷新游戏列表以更新标签数据
+  await listGames();
+  // 刷新侧边栏标签列表
+  if (sidebarRef.value && sidebarRef.value.loadTags) {
+    await sidebarRef.value.loadTags();
+  }
+  // 刷新标签管理页面（如果正在该页面）
+  if (tagManagementRef.value && tagManagementRef.value.loadTags) {
+    await tagManagementRef.value.loadTags();
+  }
+}
 </script>
 
 <template>
   <div @click="showMenu = false" style="display:flex; min-height:100vh;">
     <!-- 左侧固定侧边栏 -->
-    <Sidebar v-model="activeTab" />
+    <Sidebar v-model="activeTab" :selected-tag="selectedTag" @tag-selected="handleTagSelected" @tags-updated="handleTagsUpdated" ref="sidebarRef" />
 
     <!-- 右侧主内容区域 -->
     <main style="flex:1; margin-left:180px; background:#fff; min-height:100vh;">
@@ -983,6 +1022,7 @@ function getInfoboxValue(key) {
           :running-games="runningGames"
           :selected-games="selectedGames"
           :project-root="projectRoot"
+          :selected-tag="selectedTag"
           v-model:search-keyword="searchKeyword"
           v-model:selected-filter="selectedFilter"
           :is-multi-select-mode="isMultiSelectMode"
@@ -1005,6 +1045,7 @@ function getInfoboxValue(key) {
           @close-game="closeGame"
           @open-replace="openReplaceModal"
           @delete-game="removeGame"
+          @clear-tag-filter="selectedTag = null"
           @image-downloaded="handleImageDownloaded"
         />
       </div>
@@ -1012,6 +1053,11 @@ function getInfoboxValue(key) {
       <!-- 设置页面 -->
       <div v-else-if="activeTab === 'settings'">
         <Settings />
+      </div>
+
+      <!-- 标签管理页面 -->
+      <div v-else-if="activeTab === 'tag-management'">
+        <TagManagement @tags-updated="handleTagsUpdated" ref="tagManagementRef" />
       </div>
 
       <!-- 关于页面 -->
@@ -1043,6 +1089,7 @@ function getInfoboxValue(key) {
       @launch-game="launchFromLibrary(detailGame)"
       @close-game="closeGame(detailGame.path)"
       @delete-game="async () => { if (await removeGame(detailGame)) closeDetailModal() }"
+      @tags-updated="handleTagsUpdated"
     />
 
     <!-- 扫描结果模态框 -->

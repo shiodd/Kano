@@ -112,6 +112,7 @@ pub fn add_game(path: &str, name: Option<&str>, folder_path: Option<Vec<String>>
         playtime: 0,
         last_played: None,
         folder_path,
+        tags: vec![],
     };
     let mut db = load_games_db();
     // avoid duplicates

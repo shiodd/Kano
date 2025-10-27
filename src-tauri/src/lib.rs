@@ -39,7 +39,13 @@ pub fn run() {
             download_image,
             get_project_root,
             delete_cached_image,
-            test_network_connection
+            test_network_connection,
+            get_all_tags,
+            add_custom_tag,
+            remove_custom_tag,
+            add_tag_to_game,
+            remove_tag_from_game,
+            get_games_count_by_tag
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

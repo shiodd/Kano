@@ -88,14 +88,81 @@
               </div>
             </div>
             
-            <!-- 标签 -->
+            <!-- Bangumi 标签 -->
             <div v-if="detailData.meta_tags && detailData.meta_tags.length > 0" style="margin-bottom:16px;">
-              <div style="font-size:13px; font-weight:500; color:#666; margin-bottom:8px;">标签</div>
+              <div style="font-size:13px; font-weight:500; color:#666; margin-bottom:8px;">Bangumi 标签</div>
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
                 <span v-for="tag in detailData.meta_tags" :key="tag" 
                       style="padding:4px 10px; background:#f0f0f0; border-radius:3px; font-size:11px; color:#666; border:1px solid #e0e0e0;">
                   {{ tag }}
                 </span>
+              </div>
+            </div>
+            
+            <!-- 自定义标签 -->
+            <div v-if="game" style="margin-bottom:16px;">
+              <div style="font-size:13px; font-weight:500; color:#666; margin-bottom:8px;">我的标签</div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <span v-for="tag in (game.tags || [])" :key="tag"
+                      @click="removeTagFromGame(tag)"
+                      style="padding:4px 10px; background:#e3f2fd; border-radius:3px; font-size:11px; color:#1976d2; border:1px solid #90caf9; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; gap:4px;"
+                      @mouseenter="$event.target.style.backgroundColor='#bbdefb'"
+                      @mouseleave="$event.target.style.backgroundColor='#e3f2fd'">
+                  {{ tag }}
+                  <span style="font-weight:bold; font-size:12px;">×</span>
+                </span>
+                <button @click="showTagSelector = !showTagSelector"
+                        style="padding:4px 10px; background:#fff; border:1px solid #ddd; border-radius:3px; font-size:11px; color:#666; cursor:pointer; transition:all 0.2s;"
+                        @mouseenter="$event.target.style.backgroundColor='#f5f5f5'"
+                        @mouseleave="$event.target.style.backgroundColor='#fff'">
+                  + 添加标签
+                </button>
+              </div>
+              
+              <!-- 标签选择器/输入器 -->
+              <div v-if="showTagSelector" style="margin-top:8px; padding:12px; background:#f8f9fa; border:1px solid #e0e0e0; border-radius:4px;">
+                <!-- 已有标签列表 -->
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;">
+                  <button v-for="tag in availableTags" :key="tag"
+                          @click="addTagToGame(tag)"
+                          :disabled="game.tags && game.tags.includes(tag)"
+                          :style="{
+                            padding: '4px 10px',
+                            background: game.tags && game.tags.includes(tag) ? '#f5f5f5' : '#fff',
+                            border: '1px solid #ddd',
+                            borderRadius: '3px',
+                            fontSize: '11px',
+                            color: game.tags && game.tags.includes(tag) ? '#ccc' : '#666',
+                            cursor: game.tags && game.tags.includes(tag) ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.2s'
+                          }"
+                          @mouseenter="!(game.tags && game.tags.includes(tag)) && ($event.target.style.backgroundColor='#e3f2fd')"
+                          @mouseleave="!(game.tags && game.tags.includes(tag)) && ($event.target.style.backgroundColor='#fff')">
+                    {{ tag }}
+                  </button>
+                </div>
+                
+                <!-- 新建标签输入框 -->
+                <div style="display:flex; gap:8px; align-items:center; padding-top:8px; border-top:1px solid #e0e0e0;">
+                  <input v-model="newTagName" 
+                         @keyup.enter="addNewTag"
+                         placeholder="输入新标签名称"
+                         style="flex:1; padding:6px 10px; border:1px solid #ddd; border-radius:3px; font-size:12px; outline:none;">
+                  <button @click="addNewTag"
+                          :disabled="!newTagName.trim()"
+                          :style="{
+                            padding: '6px 12px',
+                            background: newTagName.trim() ? '#888' : '#f5f5f5',
+                            color: newTagName.trim() ? 'white' : '#ccc',
+                            border: 'none',
+                            borderRadius: '3px',
+                            fontSize: '11px',
+                            cursor: newTagName.trim() ? 'pointer' : 'not-allowed',
+                            transition: 'all 0.2s'
+                          }">
+                    创建
+                  </button>
+                </div>
               </div>
             </div>
             
@@ -147,6 +214,9 @@
 </template>
 
 <script setup>
+import { ref, onMounted, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
+
 const props = defineProps({
   visible: {
     type: Boolean,
@@ -170,7 +240,87 @@ const props = defineProps({
   }
 });
 
-defineEmits(['close', 'launch-game', 'close-game', 'delete-game']);
+const emit = defineEmits(['close', 'launch-game', 'close-game', 'delete-game', 'tags-updated']);
+
+const showTagSelector = ref(false);
+const availableTags = ref([]);
+const newTagName = ref('');
+
+async function loadAvailableTags() {
+  try {
+    availableTags.value = await invoke('get_all_tags');
+  } catch (error) {
+    console.error('加载标签失败:', error);
+  }
+}
+
+async function addNewTag() {
+  if (!newTagName.value.trim()) return;
+  
+  try {
+    // 先添加到自定义标签列表
+    await invoke('add_custom_tag', { tag: newTagName.value.trim() });
+    
+    // 然后添加到当前游戏
+    await addTagToGame(newTagName.value.trim());
+    
+    // 重新加载可用标签列表
+    await loadAvailableTags();
+    
+    // 清空输入框
+    newTagName.value = '';
+  } catch (error) {
+    alert('创建标签失败: ' + error);
+  }
+}
+
+async function addTagToGame(tag) {
+  if (!props.game) return;
+  try {
+    await invoke('add_tag_to_game', { path: props.game.path, tag });
+    // 更新本地数据
+    if (!props.game.tags) {
+      props.game.tags = [];
+    }
+    if (!props.game.tags.includes(tag)) {
+      props.game.tags.push(tag);
+    }
+    emit('tags-updated');
+  } catch (error) {
+    alert('添加标签失败: ' + error);
+  }
+}
+
+async function removeTagFromGame(tag) {
+  if (!props.game) return;
+  try {
+    await invoke('remove_tag_from_game', { path: props.game.path, tag });
+    // 更新本地数据
+    if (props.game.tags) {
+      const index = props.game.tags.indexOf(tag);
+      if (index > -1) {
+        props.game.tags.splice(index, 1);
+      }
+    }
+    emit('tags-updated');
+  } catch (error) {
+    alert('移除标签失败: ' + error);
+  }
+}
+
+watch(() => props.visible, (newVal) => {
+  if (newVal) {
+    loadAvailableTags();
+    showTagSelector.value = false;
+    newTagName.value = '';
+  }
+});
+
+onMounted(() => {
+  if (props.visible) {
+    loadAvailableTags();
+  }
+});
 
 function getInfoboxValue(key) {
   if (!props.detailData?.infobox) return null;

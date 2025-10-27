@@ -5,6 +5,15 @@
       <div style="display:flex; gap:12px; align-items:center; flex:1;">
         <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
         
+        <!-- 当前标签筛选提示 -->
+        <div v-if="selectedTag" style="display:flex; align-items:center; gap:8px; padding:4px 12px; background:#e3f2fd; border:1px solid #90caf9; border-radius:4px;">
+          <span style="font-size:13px; color:#1976d2;">{{ selectedTag }}</span>
+          <button @click="$emit('clear-tag-filter')" 
+                  style="padding:2px 6px; font-size:11px; background:transparent; border:none; color:#1976d2; cursor:pointer; font-weight:bold;">
+            ×
+          </button>
+        </div>
+        
         <!-- 搜索框 -->
         <div style="flex:1; max-width:200px;">
           <input :value="searchKeyword" 
@@ -213,6 +222,10 @@ const props = defineProps({
   selectedFilter: {
     type: String,
     default: '全部'
+  },
+  selectedTag: {
+    type: String,
+    default: null
   },
   isMultiSelectMode: {
     type: Boolean,

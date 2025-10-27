@@ -42,7 +42,8 @@
       "nsis": {
         "languages": ["SimpChinese"],
         "installerIcon": "icons/icon.ico",
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "installer.nsh"
       }
     }
   }

@@ -1,7 +1,7 @@
 # Kano
 
 <div align="center">
-  <img src="src-tauri/icons/128x128.png" alt="Kano Logo" width="128" height="128">
+  <img src="src-tauri/icons/128x128.png" alt="Kano Logo" width="64" height="64">
   
   一个轻量简洁的Galgame管理工具
   

@@ -20,8 +20,13 @@ pub async fn launch_exe(path: String, app: tauri::AppHandle, state: State<'_, Ru
         return Err("executable not found".into());
     }
     
-    // Spawn the process
-    let mut child = std::process::Command::new(&p)
+    // Spawn the process. Set the working directory to the exe's parent directory
+    // so programs that use relative paths for resources can find them.
+    let mut cmd = std::process::Command::new(&p);
+    if let Some(parent) = p.parent() {
+        cmd.current_dir(parent);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| e.to_string())?;
     

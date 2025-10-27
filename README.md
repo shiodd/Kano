@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Kano - Galgame 管理器
 
 <div align="center">
@@ -74,3 +75,6 @@
 - [ ] 主题切换
 - [ ] 多语言支持
 
+=======
+# Kano
+>>>>>>> 3cb86f9d88bb9b23f0c629fec7a0ac65dcb2e050

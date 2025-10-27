@@ -15,12 +15,8 @@ pub fn get_access_token() -> Result<Option<String>, String> {
 // Get the project root directory (parent of src-tauri)
 #[tauri::command]
 pub fn get_project_root() -> Result<String, String> {
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let root = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
+    // Use the configured project_root from config.rs so frontend and backend agree
+    let root = crate::config::project_root();
     Ok(root.to_string_lossy().to_string())
 }
 

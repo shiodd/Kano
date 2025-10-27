@@ -1,61 +1,57 @@
 use std::fs;
 use std::path::PathBuf;
+use std::env;
 use crate::models::{AppConfig, GamesDB};
 
-pub fn games_db_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let mut p = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
-    p.push("game_data");
-    p.push("games_db.json");
-    p
-}
-
-pub fn config_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let mut p = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
-    p.push("tauri_config.json");
-    p
-}
-
-pub fn cache_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let mut p = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
-    p.push("game_data");
-    p.push("bangumi_cache.json");
-    p
-}
-
-pub fn images_dir_path() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let mut p = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
-    p.push("game_data");
-    p.push("images");
-    p
-}
-
-pub fn project_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+fn app_base_dir() -> PathBuf {
+    // Prefer the executable's parent directory (installed case). Fall back to the
+    // previous behavior (parent of current working dir) and finally to temp dir.
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    let cwd = env::current_dir().unwrap_or_else(|_| env::temp_dir());
     if let Some(parent) = cwd.parent() {
         parent.to_path_buf()
     } else {
         cwd
     }
+}
+
+pub fn games_db_path() -> PathBuf {
+    let base = app_base_dir();
+    let new_dir = base.join("game_data");
+
+    // Try to migrate existing data from the old location (parent of cwd) if present.
+    let old_cwd = env::current_dir().unwrap_or_else(|_| env::temp_dir());
+    let old_base = if let Some(parent) = old_cwd.parent() { parent.to_path_buf() } else { old_cwd };
+    let old_dir = old_base.join("game_data");
+    if old_dir.exists() && !new_dir.exists() {
+        // Best-effort move; ignore errors to avoid blocking startup
+        let _ = fs::rename(&old_dir, &new_dir);
+    }
+
+    new_dir.join("games_db.json")
+}
+
+pub fn config_path() -> PathBuf {
+    let base = app_base_dir();
+    base.join("tauri_config.json")
+}
+
+pub fn cache_path() -> PathBuf {
+    let base = app_base_dir();
+    base.join("game_data").join("bangumi_cache.json")
+}
+
+pub fn images_dir_path() -> PathBuf {
+    let base = app_base_dir();
+    base.join("game_data").join("images")
+}
+
+pub fn project_root() -> PathBuf {
+    app_base_dir()
 }
 
 pub fn load_config() -> AppConfig {

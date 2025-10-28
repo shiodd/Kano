@@ -122,7 +122,7 @@ pub async fn download_image(url: &str, subject_id: i64) -> Result<String, String
     Ok(format!("kano_data/images/{}", filename))
 }
 
-// Delete a cached image by subject_id
+// Delete a cached image by subject_id.
 #[tauri::command]
 pub fn delete_cached_image(subject_id: i64) -> Result<(), String> {
     let images_dir = images_dir_path();

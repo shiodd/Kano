@@ -1,5 +1,5 @@
 use std::fs;
-use crate::config::{load_config, cache_path, images_dir_path};
+use crate::config::{load_config, cache_path, images_dir_path, load_token};
 
 #[tauri::command]
 pub fn search_bangumi(query: &str, filter: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
@@ -14,7 +14,8 @@ pub fn search_bangumi(query: &str, filter: Option<serde_json::Value>) -> Result<
         .post(url)
         .json(&serde_json::Value::Object(body))
         .header("User-Agent", "shiodd/my-private-project");
-    if let Some(tok) = load_config().access_token {
+    // Use dedicated token storage (tokens.json) when available.
+    if let Some(tok) = load_token() {
         if !tok.is_empty() {
             req = req.bearer_auth(tok);
         }
@@ -34,8 +35,8 @@ pub fn get_bangumi_subject(id: i64) -> Result<serde_json::Value, String> {
         .header("User-Agent", "shiodd/my-private-project")
         .header("Accept", "application/json");
 
-    // attach bearer token from saved config if present
-    if let Some(tok) = load_config().access_token {
+    // attach bearer token from dedicated token storage if present
+    if let Some(tok) = load_token() {
         if !tok.is_empty() {
             req = req.bearer_auth(tok);
         }

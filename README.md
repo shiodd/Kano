@@ -5,7 +5,7 @@
   
   一个轻量简洁的Galgame管理工具
   
-  ![Version](https://img.shields.io/badge/version-0.1.0-blue)
+  ![Version](https://img.shields.io/badge/version-0.2.0-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 </div>
@@ -72,7 +72,7 @@
 
 优先级大→小
 - [x] ~~游戏分类/标签功能~~
-- [ ] 记录/工具箱
+- [x] ~~工具箱~~
 - [ ] 转区打开游戏
 - [ ] Steam支持
 - [ ] 多语言支持

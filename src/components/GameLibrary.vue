@@ -1,8 +1,8 @@
 <template>
   <div>
-    <!-- 标题栏 -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="display:flex; gap:12px; align-items:center; flex:1;">
+  <!-- 标题栏（固定在顶部） -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; position:sticky; top:0; background:#fff; z-index:40; padding:8px 0; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+      <div style="display:flex; gap:12px; align-items:center; flex:1; margin-left:-4px;">
         <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
         
         <!-- 搜索框 -->

@@ -1,15 +1,16 @@
 use std::fs;
 use crate::config::{load_config, cache_path, images_dir_path, load_token};
+use tokio::fs as tokio_fs;
 
 #[tauri::command]
-pub fn search_bangumi(query: &str, filter: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+pub async fn search_bangumi(query: &str, filter: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
     let url = "https://api.bgm.tv/v0/search/subjects";
     let mut body = serde_json::Map::new();
     body.insert("keyword".to_string(), serde_json::Value::String(query.to_string()));
     if let Some(f) = filter {
         body.insert("filter".to_string(), f);
     }
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let mut req = client
         .post(url)
         .json(&serde_json::Value::Object(body))
@@ -20,16 +21,16 @@ pub fn search_bangumi(query: &str, filter: Option<serde_json::Value>) -> Result<
             req = req.bearer_auth(tok);
         }
     }
-    let resp = req.send().map_err(|e| e.to_string())?;
-    let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     Ok(v)
 }
 
 #[tauri::command]
-pub fn get_bangumi_subject(id: i64) -> Result<serde_json::Value, String> {
+pub async fn get_bangumi_subject(id: i64) -> Result<serde_json::Value, String> {
     // Use the v0 subjects endpoint (plural) and include Accept header.
     let url = format!("https://api.bgm.tv/v0/subjects/{}", id);
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let mut req = client
         .get(&url)
         .header("User-Agent", "shiodd/my-private-project")
@@ -42,10 +43,10 @@ pub fn get_bangumi_subject(id: i64) -> Result<serde_json::Value, String> {
         }
     }
 
-    let resp = req.send().map_err(|e| e.to_string())?;
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     // read the response body as text so we can return useful errors when non-2xx
-    let body_text = resp.text().map_err(|e| e.to_string())?;
+    let body_text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
         return Err(format!("HTTP {}: {}", status.as_u16(), body_text));
     }
@@ -105,18 +106,16 @@ pub async fn download_image(url: &str, subject_id: i64) -> Result<String, String
         "jpg" // default
     };
     
-    // Create images directory
+    // Create images directory (async) and save image (async) to avoid blocking runtime
     let images_dir = images_dir_path();
-    if let Err(e) = fs::create_dir_all(&images_dir) {
-        return Err(format!("create images dir failed: {}", e));
-    }
-    
+    tokio_fs::create_dir_all(&images_dir).await.map_err(|e| format!("create images dir failed: {}", e))?;
+
     // Save image as {subject_id}.{ext}
     let filename = format!("{}.{}", subject_id, ext);
     let mut image_path = images_dir.clone();
     image_path.push(&filename);
-    
-    fs::write(&image_path, bytes).map_err(|e| e.to_string())?;
+
+    tokio_fs::write(&image_path, bytes).await.map_err(|e| e.to_string())?;
     
     // Return the relative path for easier portability
     Ok(format!("kano_data/images/{}", filename))

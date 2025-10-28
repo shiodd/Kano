@@ -65,7 +65,7 @@ async function pickExe() {
     const p = await invoke('pick_exe', { initialDir: null });
     if (!p) return;
     path.value = String(p);
-    // if name is empty, prefill with exe filename (without extension)
+  // 如果 name 为空，则使用 exe 文件名（不带扩展名）作为预填充
     if (!name.value || name.value.trim() === '') {
       try {
         const s = String(p).replace(/\\/g, '/');
@@ -84,7 +84,7 @@ async function pickExe() {
 
 async function addTool() {
   if (!path.value) return alert('请填写可执行路径');
-  // if name is empty, use exe filename (without extension)
+  // 如果 name 为空，则使用 exe 文件名（不带扩展名）
   if (!name.value || name.value.trim() === '') {
     try {
       const s = String(path.value).replace(/\\/g, '/');
@@ -92,7 +92,7 @@ async function addTool() {
       const file = parts[parts.length - 1] || s;
       name.value = file.replace(/\.[^/.]+$/, '');
     } catch (e) {
-      // fallback
+      // 回退处理
       name.value = path.value;
     }
   }

@@ -11,17 +11,20 @@ import Sidebar from './components/Sidebar.vue';
 import GameLibrary from './pages/GameLibrary.vue';
 import GameDetailModal from './components/GameDetailModal.vue';
 import ReplaceModal from './components/ReplaceModal.vue';
+import { useCache } from './composables/useCache';
+import { useGameLibrary } from './composables/useGameLibrary';
+import { useImageFetch } from './composables/useImageFetch';
+import gameService from './services/gameService';
 
 const greetMsg = ref("");
 const name = ref("");
 
-// Project root directory path
-const projectRoot = ref("");
+// 使用 composables / services
+const { detailCache, getDetailCache, setDetailCache, removeDetailCache, clearAllCache, loadCacheFromFile, saveCacheToFile } = useCache();
+const { games, isLoadingGames, projectRoot, loadProjectRoot, listGames: loadGames, addGame, removeGame: removeGameService, updateGameInfo, pickExe: pickExeService, pickFolderAndScan: pickFolderAndScanService, launchExe: launchExeService, killGame: killGameService, listExes: listExesService, updateGamePlaytime: updateGamePlaytimeService } = useGameLibrary();
+const { imageFetchRunning, fetchImageForGame, autoFetchImages, loadedGamesCount, totalGamesCount } = useImageFetch(games);
 
-// Cache for Bangumi API responses - permanent cache for game details
-const detailCache = ref(new Map());
-
-// Helper function to get image source (convert local paths to Tauri asset URLs)
+// 帮助函数：获取图片源（将本地路径转换为 Tauri 可访问的文件 URL）
 function getImageSrc(imagePath) {
   if (!imagePath) return null;
   // 如果是 http/https URL，直接返回
@@ -39,105 +42,35 @@ function getImageSrc(imagePath) {
   return convertFileSrc(imagePath);
 }
 
-function getDetailCacheKey(subjectId) {
-  return `subject:${subjectId}`;
-}
-
-function setDetailCache(subjectId, data) {
-  const key = getDetailCacheKey(subjectId);
-  
-  // 只保存面板上显示的字段，减少缓存文件大小
-  // 同时将图片 URL 替换为本地相对路径
-  const filteredData = {
-    id: data.id,
-    name: data.name,
-    name_cn: data.name_cn,
-    date: data.date,
-    summary: data.summary,
-    meta_tags: data.meta_tags,
-    images: data.images ? { 
-      large: `kano_data/images/${data.id}.jpg` // 使用本地相对路径 (迁移后位于 kano_data)
-    } : null,
-    infobox: data.infobox ? data.infobox.filter(item => 
-      ['中文名', '别名', '平台', '游戏类型', '开发', '发行'].includes(item.key)
-    ) : null
-  };
-  
-  detailCache.value.set(key, filteredData);
-  saveCacheToFile(); // Save to file when cache changes
-}
-
-function getDetailCache(subjectId) {
-  const key = getDetailCacheKey(subjectId);
-  return detailCache.value.get(key) || null;
-}
-
-function removeDetailCache(subjectId) {
-  if (!subjectId) return;
-  const key = getDetailCacheKey(subjectId);
-  detailCache.value.delete(key);
-  saveCacheToFile(); // Save to file when cache changes
-}
-
-function clearAllCache() {
-  detailCache.value.clear();
-  saveCacheToFile(); // Save to file when cache changes
-}
-
-// Load cache from file
-async function loadCacheFromFile() {
-  try {
-    const cacheObj = await invoke('load_cache');
-    if (cacheObj && typeof cacheObj === 'object') {
-      detailCache.value = new Map(Object.entries(cacheObj));
-    }
-  } catch (e) {
-    console.error('Failed to load cache:', e);
-  }
-}
-
-// Save cache to file (debounced to avoid too frequent writes)
-let saveTimer = null;
-async function saveCacheToFile() {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      const cacheObj = Object.fromEntries(detailCache.value);
-      await invoke('save_cache', { cache: cacheObj });
-    } catch (e) {
-      console.error('Failed to save cache:', e);
-    }
-  }, 500); // Debounce 500ms
-}
+// 详情缓存由 useCache composable 管理（getDetailCache / setDetailCache / 等方法）
 
 async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+  // 关于 Tauri 命令的更多信息，参见：https://tauri.app/develop/calling-rust/
+  greetMsg.value = await gameService.greet(name.value);
 }
 
-// Minimal: user selects an exe and we launch it
+// 最小化示例：用户选择 EXE 并启动它
 const selectedExe = ref("");
-const games = ref([]);
 const runningGames = ref(new Set()); // 追踪正在运行的游戏路径
 const gameStartTimes = ref(new Map()); // 记录游戏启动时间 path -> timestamp
 
-// Multi-select state
+// 多选状态
 const selectedGames = ref(new Set());
 const isMultiSelectMode = ref(false);
 
-// Menu state
+// 菜单状态
 const showMenu = ref(false);
 
-// Toast state
+// Toast（提示） 状态
 const toastMessage = ref('');
 const toastVisible = ref(false);
 
-// Filter state
+// 过滤器状态
 const selectedFilter = ref('全部'); // '全部', 'ADV', 'RPG'
 const searchKeyword = ref(''); // 搜索关键词
 const selectedTag = ref(null); // 选中的标签
 
-// Computed filtered games
+// 计算属性：过滤后的游戏列表
 const filteredGames = computed(() => {
   let result = games.value;
   
@@ -193,7 +126,7 @@ function setFilter(filter) {
   selectedFilter.value = filter;
 }
 
-// Toast notification
+// Toast 通知
 function showToast(message) {
   toastMessage.value = message;
   toastVisible.value = true;
@@ -245,51 +178,38 @@ async function deleteSelectedGames() {
           removeDetailCache(game.subject_id);
           // 同时删除缓存的图片文件
           try {
-            await invoke('delete_cached_image', { subjectId: game.subject_id });
+            await gameService.deleteCachedImage({ subjectId: game.subject_id });
           } catch (err) {
             console.error('删除缓存图片失败:', err);
             // 不阻止删除流程
           }
         }
-        await invoke('remove_game', { path });
+        await removeGameService(path);
       }
     }
     selectedGames.value.clear();
-    await listGames();
+  await loadGames();
     isMultiSelectMode.value = false; // 自动退出多选模式
   } catch (e) {
     alert('批量删除失败: ' + e);
   }
 }
 
-async function listGames() {
-  try {
-    isLoadingGames.value = true;
-    loadedGamesCount.value = 0;
-    const res = await invoke('list_games');
-    games.value = res || [];
-    totalGamesCount.value = games.value.length;
-    loadedGamesCount.value = games.value.length;
-    // after loading games, automatically try to fetch images for games without images
-    autoFetchImages();
-  } catch (e) {
-    console.error('list_games failed', e);
-    games.value = [];
-  } finally {
-    isLoadingGames.value = false;
-  }
-}
+// `listGames` 功能已迁移到 useGameLibrary composable（对外以 loadGames 暴露）
+
 
 onMounted(async () => {
   try {
-    projectRoot.value = await invoke('get_project_root');
+    await loadProjectRoot();
   } catch (e) {
     console.error('Failed to get project root:', e);
   }
-  loadCacheFromFile(); // Load cache first
-  listGames();
+  await loadCacheFromFile(); // Load cache first
+  await loadGames();
+  // 启动后台任务，为没有图片的游戏抓取封面/详情
+  try { await autoFetchImages(); } catch (e) { /* ignore */ }
   
-  // Listen for game exit events
+  // 监听游戏退出事件
   listen('game-exited', async (event) => {
     const gamePath = event.payload;
     await updatePlaytime(gamePath);
@@ -297,15 +217,11 @@ onMounted(async () => {
   });
 });
 
-// (Bangumi search on main page removed — use the BangumiTest component instead)
 
 // UI: which pane is shown in main area. 'library', 'test', or 'settings'
 const activeTab = ref('library');
 const bangumiLoading = ref(false);
-const imageFetchRunning = ref(false);
-const isLoadingGames = ref(false);
-const loadedGamesCount = ref(0);
-const totalGamesCount = ref(0);
+// imageFetchRunning、isLoadingGames、loadedGamesCount、totalGamesCount 由 composable 提供
 
 function formatSeconds(s) {
   const h = Math.floor(s / 3600);
@@ -315,20 +231,20 @@ function formatSeconds(s) {
 }
 
 async function scan() {
-  // removed
+  // 已移除（占位）
 }
 
 async function startGame(g) {
-  // removed
+  // 已移除（占位）
 }
 
 async function stopGame(g) {
-  // removed
+  // 已移除（占位）
 }
 
 async function pickExe() {
   try {
-    const path = await invoke('pick_exe', { initialDir: null });
+  const path = await pickExeService(null);
     if (!path) return;
     selectedExe.value = String(path);
   } catch (e) {
@@ -346,7 +262,7 @@ async function scanFolder() {
   try {
     isScanningFolder.value = true;
     selectedScannedGames.value = new Set(); // 重置选中状态
-    const games = await invoke('pick_folder_and_scan');
+    const games = await pickFolderAndScanService();
     if (!games || games.length === 0) {
       alert('文件夹中没有找到游戏');
       return;
@@ -365,15 +281,13 @@ async function scanFolder() {
 async function addScannedGames(selectedGames) {
   try {
     for (const game of selectedGames) {
-      await invoke('add_game', { 
-        path: game.path, 
-        name: game.name,
-        folderPath: game.folder_path
-      });
+      await addGame({ path: game.path, name: game.name, folderPath: game.folder_path });
     }
     scannedGames.value = [];
     selectedScannedGames.value = new Set();
-    await listGames();
+  await loadGames();
+    // Try to fetch images/details for newly added games immediately
+    try { await autoFetchImages(); } catch (e) { /* ignore */ }
   } catch (e) {
     alert('添加失败: ' + e);
   }
@@ -399,7 +313,7 @@ function addSelectedScannedGames() {
 async function launchSelected() {
   if (!selectedExe.value) return alert('请先选择一个 EXE');
   try {
-    await invoke('launch_exe', { path: selectedExe.value });
+    await launchExeService({ path: selectedExe.value });
   } catch (e) {
     alert('启动失败: ' + e);
   }
@@ -408,8 +322,10 @@ async function launchSelected() {
 async function addSelectedToLibrary() {
   if (!selectedExe.value) return showToast('请先选择一个 EXE');
   try {
-    await invoke('add_game', { path: selectedExe.value, name: null, folderPath: null });
-    await listGames();
+    await addGame({ path: selectedExe.value, name: null, folderPath: null });
+    await loadGames();
+    // Fetch images/details for the new game
+    try { await autoFetchImages(); } catch (e) { /* ignore */ }
     selectedExe.value = ''; // 清空选中状态
     showToast('加入成功');
   } catch (e) {
@@ -436,14 +352,14 @@ async function removeGame(g) {
       removeDetailCache(g.subject_id);
       // 同时删除缓存的图片文件
       try {
-        await invoke('delete_cached_image', { subjectId: g.subject_id });
+        await gameService.deleteCachedImage({ subjectId: g.subject_id });
       } catch (err) {
         console.error('删除缓存图片失败:', err);
         // 不阻止删除游戏流程
       }
     }
-    await invoke('remove_game', { path: g.path });
-    await listGames();
+    await removeGameService(g.path);
+    await loadGames();
     return true; // 删除成功，返回 true
   } catch (e) {
     alert('删除失败: ' + e);
@@ -451,166 +367,7 @@ async function removeGame(g) {
   }
 }
 
-// Try to fetch image for a single game entry.
-// Returns true if image was found and saved.
-async function fetchImageForGame(g) {
-  try {
-    const p = g.path || '';
-    const parts = p.split(/[\\/]/);
-    const exeName = parts[parts.length - 1] || p;
-    
-    // 使用扫描时提取的 folder_path（从游戏文件夹内部开始的相对路径）
-    let gameFolderNames = [];
-    if (g.folder_path && Array.isArray(g.folder_path) && g.folder_path.length > 0) {
-      gameFolderNames = [...g.folder_path];
-    }
-    
-    // 如果没有 folder_path 或为空数组，尝试从 exe 路径提取文件夹名
-    if (gameFolderNames.length === 0) {
-      const pathParts = p.split(/[\\/]/).filter(Boolean);
-      if (pathParts.length >= 2) {
-        gameFolderNames = [pathParts[pathParts.length - 2]];
-      } else {
-        return false;
-      }
-    }
-    
-    let res = null;
-    let list = [];
-    const filter = { type: [4], nsfw: true };
-    
-    // Try 1-N: 依次使用各层文件夹名搜索
-    for (const folderName of gameFolderNames) {
-      if (!folderName) continue;
-      
-      res = await invoke('search_bangumi', { query: folderName, filter });
-      if (res) {
-        if (Array.isArray(res)) list = res;
-        else if (res.data && Array.isArray(res.data)) list = res.data;
-        else if (res.results && Array.isArray(res.results)) list = res.results;
-        else if (res.subjects && Array.isArray(res.subjects)) list = res.subjects;
-        else if (res.items && Array.isArray(res.items)) list = res.items;
-        else {
-          for (const k in res) if (Array.isArray(res[k])) { list = res[k]; break; }
-        }
-      }
-      
-      // 如果找到结果，停止搜索
-      if (list && list.length > 0) {
-        break;
-      }
-    }
-
-  // If we have results, try to get image and save it to game
-    if (list && list.length > 0) {
-      // if game name or exe name contains 'FD' (case-insensitive), prefer second result
-      const fdFlag = gameFolderNames.some(name => /fd/i.test(name)) || /fd/i.test(exeName);
-      const idx = (fdFlag && list.length > 1) ? 1 : 0;
-      const first = list[idx];
-      
-      const image = first.image || (first.subject && first.subject.image) || (first.images && (first.images.large || first.images.medium || first.images.small || first.images.common || first.images.grid)) || (first.subject && first.subject.images && (first.subject.images.large || first.subject.images.medium || first.subject.images.small));
-      const title = first.name_cn || first.name || first.title || (first.subject && (first.subject.name_cn || first.subject.name || first.subject.title)) || null;
-      
-      if (image || title || first.id) {
-        try {
-          // robust id extraction: prefers id directly, then data array, then subject
-          const getId = (node) => {
-            if (!node) return null;
-            if (node.id) return node.id;
-            if (node.data) {
-              if (Array.isArray(node.data) && node.data.length > 0 && node.data[0].id) return node.data[0].id;
-              if (node.data.id) return node.data.id;
-            }
-            if (node.subject && node.subject.id) return node.subject.id;
-            return null;
-          };
-          
-          const sid = getId(first);
-          const numericSid = sid ? Number(sid) : null;
-          if (sid && isNaN(numericSid)) {
-            return false;
-          }
-          
-          const updRes = await invoke('update_game_info', {
-            path: g.path,
-            name: title,
-            image: image,
-            imageUrl: image, // 同时保存网络地址
-            subjectId: numericSid
-          });
-          
-          // update local copy from backend result
-          if (updRes && updRes.name) g.name = updRes.name;
-          if (updRes && updRes.image) g.image = updRes.image;
-          if (updRes && updRes.image_url) g.image_url = updRes.image_url;
-          if (updRes && updRes.subject_id) g.subject_id = updRes.subject_id;
-          
-          // 立即下载图片并缓存详情信息
-          if (numericSid && image) {
-            try {
-              // 下载并保存图片到本地，文件名为 subject_id
-              const localImagePath = await invoke('download_image', { 
-                url: image, 
-                subjectId: numericSid 
-              });
-              
-              // 更新游戏使用本地图片路径
-              if (localImagePath) {
-                await invoke('update_game_info', {
-                  path: g.path,
-                  name: null,
-                  image: localImagePath,
-                  imageUrl: null,
-                  subjectId: null
-                });
-                g.image = localImagePath;
-              }
-              
-              // 获取并缓存完整的详情信息
-              const detailData = await invoke('get_bangumi_subject', { id: numericSid });
-              if (detailData) {
-                setDetailCache(numericSid, detailData);
-              }
-            } catch (err) {
-              console.error('下载图片或缓存详情失败:', err);
-              // 不阻止流程，继续使用在线图片
-            }
-          }
-          
-          return true;
-        } catch (e) {
-          console.error('update_game_info failed', e);
-        }
-      }
-    }
-    return false;
-  } catch (e) {
-    console.error('fetchImageForGame failed', e);
-    return false;
-  }
-}
-
-// Iterate through games and fetch images for those without image.
-async function autoFetchImages() {
-  if (imageFetchRunning.value) return;
-  imageFetchRunning.value = true;
-  try {
-    let processedCount = 0;
-    const gamesWithoutImage = games.value.filter(g => !g.image);
-    totalGamesCount.value = gamesWithoutImage.length;
-    loadedGamesCount.value = 0;
-    
-    for (const g of gamesWithoutImage) {
-      await fetchImageForGame(g);
-      processedCount++;
-      loadedGamesCount.value = processedCount;
-      // small delay to avoid hammering the API
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  } finally {
-    imageFetchRunning.value = false;
-  }
-}
+// image fetch logic moved to useImageFetch composable (fetchImageForGame / autoFetchImages)
 
 async function launchFromLibrary(g) {
   // 检查游戏是否已在运行中
@@ -622,7 +379,7 @@ async function launchFromLibrary(g) {
   try {
     runningGames.value.add(g.path); // 标记为运行中
     gameStartTimes.value.set(g.path, Date.now()); // 记录启动时间
-    await invoke('launch_exe', { path: g.path });
+    await launchExeService(g.path);
     // 进程监控会在游戏关闭时自动移除运行状态
   } catch (e) {
     runningGames.value.delete(g.path); // 启动失败时移除状态
@@ -634,7 +391,7 @@ async function launchFromLibrary(g) {
 // 手动关闭游戏（终止进程）
 async function closeGame(gamePath) {
   try {
-    await invoke('kill_game', { path: gamePath });
+    await killGameService(gamePath);
     await updatePlaytime(gamePath);
     runningGames.value.delete(gamePath);
   } catch (e) {
@@ -654,7 +411,7 @@ async function updatePlaytime(gamePath) {
   const lastPlayed = new Date().toISOString();
   
   try {
-    const totalPlaytime = await invoke('update_game_playtime', { 
+    const totalPlaytime = await updateGamePlaytimeService({ 
       path: gamePath, 
       additionalSeconds: playedSeconds,
       lastPlayed: lastPlayed
@@ -723,7 +480,7 @@ function formatLastPlayed(isoString) {
 
 async function launch(g) {
   try {
-    const list = await invoke('list_exes', { game_dir: g.path });
+    const list = await listExesService(g.path);
     // list may be [] or array
     exeList.value = list || [];
     if (exeList.value.length === 0) {
@@ -731,7 +488,7 @@ async function launch(g) {
       return;
     }
     if (exeList.value.length === 1) {
-      await invoke('launch_exe', { path: exeList.value[0] });
+      await launchExeService(exeList.value[0]);
       return;
     }
     // multiple: show modal
@@ -745,7 +502,7 @@ async function launch(g) {
 
 async function confirmLaunch() {
   try {
-    await invoke('launch_exe', { path: chosenExe.value });
+    await launchExeService(chosenExe.value);
     showExeModal.value = false;
   } catch (e) {
     alert('启动失败: ' + e);
@@ -780,38 +537,22 @@ async function replaceExeFile() {
     pathParts.pop();
     const initialDir = pathParts.join('\\');
     
-    const newPath = await invoke('pick_exe', { initialDir });
+  const newPath = await pickExeService(initialDir);
     if (!newPath) return;
     
     const oldPath = replaceTargetGame.value.path;
     
     // 更新游戏的 exe 路径（保持其他信息不变）
-    await invoke('update_game_info', {
-      path: oldPath,
-      name: null,
-      image: null,
-      imageUrl: null,
-      subjectId: null
-    });
+    await updateGameInfo({ path: oldPath, name: null, image: null, imageUrl: null, subjectId: null });
     
     // 从数据库中删除旧路径的游戏
-    await invoke('remove_game', { path: oldPath });
+  await removeGameService(oldPath);
     
     // 添加新路径的游戏（复制原有信息，保留 folder_path）
-    await invoke('add_game', { 
-      path: newPath, 
-      name: replaceTargetGame.value.name,
-      folderPath: replaceTargetGame.value.folder_path || null
-    });
+    await addGame({ path: newPath, name: replaceTargetGame.value.name, folderPath: replaceTargetGame.value.folder_path || null });
     
     // 更新新游戏的完整信息
-    await invoke('update_game_info', {
-      path: newPath,
-      name: replaceTargetGame.value.name,
-      image: replaceTargetGame.value.image,
-      imageUrl: replaceTargetGame.value.image_url,
-      subjectId: replaceTargetGame.value.subject_id
-    });
+    await updateGameInfo({ path: newPath, name: replaceTargetGame.value.name, image: replaceTargetGame.value.image, imageUrl: replaceTargetGame.value.image_url, subjectId: replaceTargetGame.value.subject_id });
     
     // 在本地游戏列表中找到并更新该游戏
     const gameIndex = games.value.findIndex(g => g.path === oldPath);
@@ -824,6 +565,8 @@ async function replaceExeFile() {
     
     alert('EXE 文件已更换');
     closeReplaceModal();
+    // Refresh list and try to fetch images/details for the replaced game
+    try { await loadGames(); await autoFetchImages(); } catch (e) { /* ignore */ }
   } catch (e) {
     if (e === 'cancelled' || e === 'canceled') return;
     alert('更换失败: ' + e);
@@ -837,7 +580,7 @@ async function runReplaceSearch(keyword) {
   replaceLoading.value = true;
   try {
     const filter = { type: [4], nsfw: true };
-    const res = await invoke('search_bangumi', { query: searchKeyword, filter });
+  const res = await gameService.searchBangumi({ query: searchKeyword, filter });
     
     let list = [];
     if (res) {
@@ -878,13 +621,7 @@ async function selectReplaceItem(item) {
   const oldSubjectId = replaceTargetGame.value.subject_id;
   
   try {
-    const updRes = await invoke('update_game_info', { 
-      path: replaceTargetGame.value.path, 
-      name: title, 
-      image, 
-      imageUrl: image, // 同时保存网络地址
-      subjectId: sid 
-    });
+    const updRes = await updateGameInfo({ path: replaceTargetGame.value.path, name: title, image, imageUrl: image, subjectId: sid });
     // update local copy from backend result
     if (updRes && updRes.name) replaceTargetGame.value.name = updRes.name;
     if (updRes && updRes.image) replaceTargetGame.value.image = updRes.image;
@@ -894,8 +631,8 @@ async function selectReplaceItem(item) {
     // 如果更换了条目，删除旧的缓存和图片
     if (oldSubjectId && oldSubjectId !== sid) {
       try {
-        removeDetailCache(oldSubjectId);
-        await invoke('delete_cached_image', { subjectId: oldSubjectId });
+  removeDetailCache(oldSubjectId);
+  await gameService.deleteCachedImage({ subjectId: oldSubjectId });
       } catch (err) {
         console.error('删除旧缓存失败:', err);
       }
@@ -905,28 +642,17 @@ async function selectReplaceItem(item) {
     if (sid && image) {
       try {
         // 下载并保存图片到本地
-        const localImagePath = await invoke('download_image', { 
-          url: image, 
-          subjectId: sid 
-        });
+        const localImagePath = await gameService.downloadImage({ url: image, subjectId: sid });
         
         // 更新游戏使用本地图片路径
         if (localImagePath) {
-          await invoke('update_game_info', {
-            path: replaceTargetGame.value.path,
-            name: null,
-            image: localImagePath,
-            imageUrl: null,
-            subjectId: null
-          });
+          await updateGameInfo({ path: replaceTargetGame.value.path, name: null, image: localImagePath, imageUrl: null, subjectId: null });
           replaceTargetGame.value.image = localImagePath;
         }
         
         // 获取并缓存完整的详情信息
-        const detailData = await invoke('get_bangumi_subject', { id: sid });
-        if (detailData) {
-          setDetailCache(sid, detailData);
-        }
+        const detailData = await gameService.getBangumiSubject(sid);
+        if (detailData) setDetailCache(sid, detailData);
       } catch (err) {
         console.error('下载图片或缓存详情失败:', err);
         // 不阻止流程
@@ -934,6 +660,8 @@ async function selectReplaceItem(item) {
     }
     
     closeReplaceModal();
+    // After selecting a replacement item, ensure UI reflects changes and try to fetch missing images
+    try { await loadGames(); await autoFetchImages(); } catch (e) { /* ignore */ }
   } catch (e) {
     console.error('替换失败:', e);
     alert('替换失败: ' + e);
@@ -951,7 +679,7 @@ async function openGameDetail(g) {
     // Check permanent cache first
     let res = getDetailCache(g.subject_id);
     if (!res) {
-      res = await invoke('get_bangumi_subject', { id: g.subject_id });
+      res = await gameService.getBangumiSubject(g.subject_id);
       if (res) setDetailCache(g.subject_id, res);
     }
     detailData.value = res;
@@ -997,7 +725,7 @@ function handleTagSelected(tag) {
 
 async function handleTagsUpdated() {
   // 刷新游戏列表以更新标签数据
-  await listGames();
+  await loadGames();
   // 刷新侧边栏标签列表
   if (sidebarRef.value && sidebarRef.value.loadTags) {
     await sidebarRef.value.loadTags();

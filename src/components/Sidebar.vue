@@ -91,7 +91,7 @@ function toggleLibrary() {
 
 function openTagManagement() {
   // 切换到标签管理页面并清除当前标签筛选，确保父组件会响应
-  // Important: emit tag-selected first to avoid parent handler forcing activeTab back to 'library'
+  // 重要：先触发 tag-selected 以避免父组件的处理器将 activeTab 强制切回 'library'
   emit('tag-selected', null);
   emit('update:modelValue', 'tag-management');
   // 展开标签区域以便用户看到管理入口（可选）
@@ -181,7 +181,7 @@ nav > div:first-of-type button:hover {
 }
 
 /* 管理按钮（标签区域）统一样式 */
-/* compact manage button override to keep dark background on hover and match size */
+/* 管理按钮样式覆盖：保持悬停时的深色背景并匹配大小 */
 .compact-manage {
   padding: 2px 6px !important;
   font-size: 12px !important;
@@ -195,7 +195,7 @@ nav > div:first-of-type button:hover {
   background: transparent !important;
   color: #1976d2 !important;
 }
-/* when tag-management is active, make the manage button appear like other tag items */
+/* 当 tag-management 激活时，使管理按钮外观与其他标签项一致 */
 nav > div:first-of-type button.compact-manage.active {
   background: #e3f2fd !important;
   color: #1976d2 !important;

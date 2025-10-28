@@ -1,8 +1,8 @@
 <template>
   <div @click="showMenu = false; showFilterMenu = false">
-    <!-- 标题栏 -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="display:flex; gap:12px; align-items:center; flex:1;">
+  <!-- 标题栏（固定在顶部） -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; position:sticky; top:0; background:#fff; z-index:40; padding:8px 0; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+      <div style="display:flex; gap:12px; align-items:center; flex:1; margin-left:-4px;">
         <h1 style="margin:0; font-size:20px; font-weight:500; color:#333;">游戏库</h1>
         
         <!-- 当前标签筛选提示 -->
@@ -290,7 +290,7 @@ const isAllSelected = computed(() => {
   return props.filteredGames.every(game => props.selectedGames.has(game.path));
 });
 
-// Helper function to get image source
+// 帮助函数：获取图片源（将本地路径转换为 Tauri 可访问的文件 URL）
 function getImageSrc(imagePath) {
   if (!imagePath) return null;
   // 如果是 http/https URL，直接返回

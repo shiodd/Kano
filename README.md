@@ -32,6 +32,10 @@
 #### 标签
 ![游戏详情](readme_image/library_tag.png)
 
+#### v0.2.0新增工具箱
+![工具箱](readme_image/tools.png)
+
+
 ##  快速开始
 
 ### 安装

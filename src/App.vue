@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from './pages/Settings.vue';
 import About from './pages/About.vue';
 import TagManagement from './pages/TagManagement.vue';
+import Toolbox from './pages/Toolbox.vue';
 import Sidebar from './components/Sidebar.vue';
 import GameLibrary from './pages/GameLibrary.vue';
 import GameDetailModal from './components/GameDetailModal.vue';
@@ -27,9 +28,11 @@ function getImageSrc(imagePath) {
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     return imagePath;
   }
-  // 如果是相对路径（game_data/images/...），转换为绝对路径
-  if (imagePath.startsWith('game_data/')) {
-    const absolutePath = `${projectRoot.value}\\${imagePath.replace(/\//g, '\\\\')}`;
+  // 支持旧的 game_data/ 前缀，同时优先识别新的 kano_data/
+  if (imagePath.startsWith('kano_data/') || imagePath.startsWith('game_data/')) {
+    // 兼容：如果是旧前缀 game_data/，将其视为 kano_data/
+    const fixed = imagePath.startsWith('game_data/') ? imagePath.replace(/^game_data\//, 'kano_data/') : imagePath;
+    const absolutePath = `${projectRoot.value}\\${fixed.replace(/\//g, '\\\\')}`;
     return convertFileSrc(absolutePath);
   }
   // 其他情况（绝对路径）直接转换
@@ -53,7 +56,7 @@ function setDetailCache(subjectId, data) {
     summary: data.summary,
     meta_tags: data.meta_tags,
     images: data.images ? { 
-      large: `game_data/images/${data.id}.jpg` // 使用本地相对路径
+      large: `kano_data/images/${data.id}.jpg` // 使用本地相对路径 (迁移后位于 kano_data)
     } : null,
     infobox: data.infobox ? data.infobox.filter(item => 
       ['中文名', '别名', '平台', '游戏类型', '开发', '发行'].includes(item.key)
@@ -1056,9 +1059,14 @@ async function handleTagsUpdated() {
       </div>
 
       <!-- 标签管理页面 -->
-      <div v-else-if="activeTab === 'tag-management'">
-        <TagManagement @tags-updated="handleTagsUpdated" ref="tagManagementRef" />
-      </div>
+        <div v-else-if="activeTab === 'tag-management'">
+          <TagManagement @tags-updated="handleTagsUpdated" ref="tagManagementRef" />
+        </div>
+
+        <!-- 工具箱页面 -->
+        <div v-else-if="activeTab === 'toolbox'">
+          <Toolbox />
+        </div>
 
       <!-- 关于页面 -->
       <div v-else-if="activeTab === 'about'">

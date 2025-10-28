@@ -28,4 +28,14 @@ pub struct GamesDB {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AppConfig {
     pub access_token: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<ToolEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolEntry {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    // arguments removed — tools are simple (id, name, path)
 }

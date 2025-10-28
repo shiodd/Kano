@@ -33,6 +33,12 @@
         </div>
       </div>
 
+      <!-- 将工具箱按钮放在分割线之上，靠近标签区，方便访问 -->
+      <button :class="{active: modelValue === 'toolbox'}" @click="$emit('update:modelValue', 'toolbox')" 
+              style="text-align:left; padding:10px 16px; font-size:14px; background:transparent; border:none; color:#666; cursor:pointer; transition:all 0.2s; border-left:2px solid transparent; width:100%; display:block;">
+        工具箱
+      </button>
+
       <div style="flex:1;"></div>
       
       <!-- 固定在底部的设置和关于按钮 -->

@@ -1,26 +1,66 @@
-use crate::config::{load_config, save_config};
+use crate::config::{load_config, save_config, load_tools_file, save_tools_file, load_token, save_token};
+use crate::models::ToolEntry;
+use uuid::Uuid;
 
 #[tauri::command]
 pub fn set_access_token(token: &str) -> Result<(), String> {
-    let mut cfg = load_config();
-    cfg.access_token = if token.is_empty() { None } else { Some(token.to_string()) };
-    save_config(&cfg)
+    if token.is_empty() {
+        // clear token file by writing empty string
+        return save_token("");
+    }
+    save_token(token)
 }
 
 #[tauri::command]
 pub fn get_access_token() -> Result<Option<String>, String> {
-    Ok(load_config().access_token)
+    Ok(load_token())
+}
+
+#[tauri::command]
+pub fn get_tools() -> Result<Vec<ToolEntry>, String> {
+    Ok(load_tools_file())
+}
+
+#[tauri::command]
+pub fn add_tool(name: &str, path: &str) -> Result<ToolEntry, String> {
+    let mut tools = load_tools_file();
+    let id = Uuid::new_v4().to_string();
+    let entry = ToolEntry { id: id.clone(), name: name.to_string(), path: path.to_string() };
+    tools.push(entry.clone());
+    save_tools_file(&tools)?;
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn remove_tool(id: &str) -> Result<(), String> {
+    let mut tools = load_tools_file();
+    tools.retain(|t| t.id != id);
+    save_tools_file(&tools)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn launch_tool(id: &str) -> Result<(), String> {
+    let tools = load_tools_file();
+    if let Some(tool) = tools.iter().find(|t| t.id == id) {
+        let mut cmd = std::process::Command::new(&tool.path);
+        if let Some(parent) = std::path::Path::new(&tool.path).parent() {
+            cmd.current_dir(parent);
+        }
+        cmd.spawn().map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("tool not found".into())
+    }
 }
 
 // Get the project root directory (parent of src-tauri)
 #[tauri::command]
 pub fn get_project_root() -> Result<String, String> {
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let root = if let Some(parent) = cwd.parent() {
-        parent.to_path_buf()
-    } else {
-        cwd
-    };
+    // Use the app-local project root (prefer executable parent). This keeps
+    // behavior consistent with functions in `config.rs` such as
+    // `games_db_path()` / `images_dir_path()` which use `app_base_dir()`.
+    let root = crate::config::project_root();
     Ok(root.to_string_lossy().to_string())
 }
 
@@ -34,7 +74,7 @@ pub fn test_network_connection() -> Result<serde_json::Value, String> {
         .map_err(|e| e.to_string())?;
     
     // 获取 access token
-    let token = load_config().access_token;
+    let token = load_token();
     
     // 测试基础连接
     let start = std::time::Instant::now();

@@ -297,9 +297,10 @@ function getImageSrc(imagePath) {
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     return imagePath;
   }
-  // 如果是相对路径（game_data/images/...），转换为绝对路径
-  if (imagePath.startsWith('game_data/')) {
-    const absolutePath = `${props.projectRoot}\\${imagePath.replace(/\//g, '\\\\')}`;
+  // 支持旧的 game_data/ 前缀，同时优先识别新的 kano_data/
+  if (imagePath.startsWith('kano_data/') || imagePath.startsWith('game_data/')) {
+    const fixed = imagePath.startsWith('game_data/') ? imagePath.replace(/^game_data\//, 'kano_data/') : imagePath;
+    const absolutePath = `${props.projectRoot}\\${fixed.replace(/\//g, '\\\\')}`;
     return convertFileSrc(absolutePath);
   }
   // 其他情况（绝对路径）直接转换

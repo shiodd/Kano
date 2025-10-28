@@ -52,7 +52,7 @@
               color: testResult.success ? '#4CAF50' : '#f44336',
               fontWeight: '500'
             }">
-              Bangumi 网页连接{{ testResult.success ? '正常' : '失败' }}
+              Bangumi网页连接 {{ testResult.success ? '正常' : '失败' }}
             </span>
             <span v-if="testResult.success && testResult.latency !== null" style="font-size:12px; color:#999;">
               ({{ testResult.latency }}ms)
@@ -90,7 +90,7 @@
               fontSize: '13px',
               color: testResult.nsfwGameApi ? '#4CAF50' : '#f44336'
             }">
-              完整游戏api {{ testResult.nsfwGameApi ? '正常' : '失败' }}
+              完整内容api {{ testResult.nsfwGameApi ? '正常' : '失败' }}
             </span>
             <span v-if="testResult.nsfwGameApi && testResult.nsfwGameLatency !== null" style="font-size:12px; color:#999;">
               ({{ testResult.nsfwGameLatency }}ms)

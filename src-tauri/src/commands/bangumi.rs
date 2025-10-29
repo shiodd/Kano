@@ -1,5 +1,5 @@
 use std::fs;
-use crate::config::{load_config, cache_path, images_dir_path, load_token};
+use crate::config::{cache_path, images_dir_path, load_token};
 use tokio::fs as tokio_fs;
 
 #[tauri::command]

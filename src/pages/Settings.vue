@@ -5,7 +5,7 @@
     <div style="margin-bottom:20px; padding:16px; background:#f8f9fa; border-radius:4px; border:1px solid #e0e0e0;">
       <label style="display:block; font-weight:500; margin-bottom:8px; font-size:13px; color:#333;">Bangumi Access Token</label>
       <div style="font-size:12px; color:#999; margin-bottom:10px;">
-        用于访问 NSFW 内容。在 <a href="https://next.bgm.tv/demo/access-token " target="_blank" style="color:#666; text-decoration:underline;">Bangumi access-token</a> 获取。
+        用于访问完整内容。在 <a href="https://next.bgm.tv/demo/access-token " target="_blank" style="color:#666; text-decoration:underline;">Bangumi access-token</a> 获取。
       </div>
       <div style="display:flex; gap:8px;">
         <div style="position:relative; flex:1;">

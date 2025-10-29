@@ -1,6 +1,10 @@
 <template>
-  <div v-if="visible && detailData" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); z-index:90; padding:20px;">
-    <div style="width:90%; max-width:900px; max-height:90%; overflow:auto; background:#fff; border-radius:4px; border:1px solid #ddd; display:flex; flex-direction:column;">
+  <div v-if="visible && detailData" ref="overlayRef" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); z-index:90; padding:20px;">
+    <!--
+      使用边界感知的事件处理，防止在 modal 内滚动到边界时触发后面的页面滚动（滚动穿透）。
+      通过 overlayRef 捕获 wheel / touchmove（非 passive）并在必要时 preventDefault/stopPropagation。
+    -->
+    <div ref="modalRef" style="width:90%; max-width:900px; max-height:90%; overflow:auto; background:#fff; border-radius:4px; border:1px solid #ddd; display:flex; flex-direction:column;">
       <!-- 头部 -->
       <div style="padding:20px; border-bottom:1px solid #e0e0e0; display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0; font-size:18px; font-weight:500; color:#333;">游戏详情</h3>
@@ -214,7 +218,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const props = defineProps({
@@ -316,6 +320,25 @@ watch(() => props.visible, (newVal) => {
   }
 });
 
+// 在 modal 打开时锁定 body 滚动，关闭时恢复（作为额外保险，彻底避免背景滚动）
+let _prevBodyOverflow = null;
+watch(() => props.visible, (visible) => {
+  try {
+    const docBody = document && document.body;
+    if (!docBody) return;
+    if (visible) {
+      _prevBodyOverflow = docBody.style.overflow;
+      docBody.style.overflow = 'hidden';
+    } else {
+      if (_prevBodyOverflow !== null) docBody.style.overflow = _prevBodyOverflow;
+      else docBody.style.overflow = '';
+      _prevBodyOverflow = null;
+    }
+  } catch (e) {
+    // 在非浏览器环境或测试环境忽略
+  }
+});
+
 onMounted(() => {
   if (props.visible) {
     loadAvailableTags();
@@ -359,4 +382,96 @@ function formatLastPlayed(timestamp) {
   
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
+// 边界感知的滚动穿透防护逻辑
+
+const overlayRef = ref(null);
+const modalRef = ref(null);
+
+// 查找从 target 向上最近的可滚动元素（限制在 modalRef 内）
+function findScrollableWithinModal(target) {
+  let el = target;
+  const modal = modalRef.value;
+  while (el && el !== document.body) {
+    if (el === modal) {
+      // modal 本身可滚动时返回 modal
+      if (modal && modal.scrollHeight > modal.clientHeight) return modal;
+      return null;
+    }
+    if (el.scrollHeight > el.clientHeight) {
+      // 发现内部可滚动元素
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function onWheel(e) {
+  // 仅在 modal 可见时处理
+  if (!overlayRef.value || !modalRef.value) return;
+  const target = e.target;
+  const scrollEl = findScrollableWithinModal(target) || modalRef.value;
+  if (!scrollEl) {
+    // 没有可滚动元素，阻止冒泡以避免背景滚动
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
+  const delta = e.deltaY;
+  const atTop = scrollEl.scrollTop <= 0;
+  const atBottom = Math.ceil(scrollEl.scrollTop + scrollEl.clientHeight) >= scrollEl.scrollHeight;
+
+  // 当尝试继续向上滚动并且已经在顶部，或继续向下滚动并且已经在底部，阻止事件穿透
+  if ((delta < 0 && atTop) || (delta > 0 && atBottom)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  // 否则允许正常滚动（不阻止）
+}
+
+let touchStartY = 0;
+let touchScrollEl = null;
+
+function onTouchStart(e) {
+  if (!modalRef.value) return;
+  touchStartY = e.touches && e.touches.length ? e.touches[0].clientY : 0;
+  touchScrollEl = findScrollableWithinModal(e.target) || modalRef.value;
+}
+
+function onTouchMove(e) {
+  if (!touchScrollEl) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+  const currentY = e.touches && e.touches.length ? e.touches[0].clientY : 0;
+  const delta = touchStartY - currentY;
+  const atTop = touchScrollEl.scrollTop <= 0;
+  const atBottom = Math.ceil(touchScrollEl.scrollTop + touchScrollEl.clientHeight) >= touchScrollEl.scrollHeight;
+
+  if ((delta < 0 && atTop) || (delta > 0 && atBottom)) {
+    // 在边界继续滑动，阻止穿透
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+
+onMounted(() => {
+  // 使用 capture 并且 passive: false，这样可以在 handler 中调用 preventDefault
+  const overlay = overlayRef.value;
+  if (!overlay) return;
+  overlay.addEventListener('wheel', onWheel, { capture: true, passive: false });
+  overlay.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+  overlay.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+});
+
+onBeforeUnmount(() => {
+  const overlay = overlayRef.value;
+  if (!overlay) return;
+  overlay.removeEventListener('wheel', onWheel, { capture: true, passive: false });
+  overlay.removeEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+  overlay.removeEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+});
+
 </script>

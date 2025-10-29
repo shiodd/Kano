@@ -73,6 +73,28 @@ export async function deleteCachedImage({ subjectId }) {
   return await invoke('delete_cached_image', { subjectId });
 }
 
+export async function listNotes() {
+  return await invoke('list_notes');
+}
+
+export async function getNote(id) {
+  // Tauri converts snake_case param names to camelCase in the JS args
+  // so Rust parameter `game_id` is expected as `gameId` on the JS side.
+  return await invoke('get_note', { gameId: String(id) });
+}
+
+export async function saveNote(note) {
+  return await invoke('save_note', { note });
+}
+
+export async function deleteNote(id) {
+  return await invoke('delete_note', { gameId: String(id) });
+}
+
+export async function deleteNoteByIndex(index) {
+  return await invoke('delete_note_by_index', { index });
+}
+
 export default {
   loadCache,
   greet,
@@ -92,4 +114,10 @@ export default {
   listExes,
   updateGamePlaytime,
   deleteCachedImage,
+  // notes
+  listNotes,
+  getNote,
+  saveNote,
+  deleteNote,
+  deleteNoteByIndex,
 };

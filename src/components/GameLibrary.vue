@@ -43,7 +43,7 @@
                 style="padding:8px 16px; font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:4px;"
                 @mouseenter="$event.target.style.backgroundColor='#f0f0f0'"
                 @mouseleave="$event.target.style.backgroundColor='#fff'">
-          操作 ▼
+          添加 ▼
         </button>
         
         <!-- 下拉菜单 -->

@@ -8,10 +8,16 @@
       <!-- 头部 -->
       <div style="padding:20px; border-bottom:1px solid #e0e0e0; display:flex; justify-content:space-between; align-items:center;">
         <h3 style="margin:0; font-size:18px; font-weight:500; color:#333;">游戏详情</h3>
-        <button @click="$emit('close')" 
-                style="padding:6px 12px; font-size:13px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
-                @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
-                @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">关闭</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button v-if="game" @click="openNotesEditor" 
+                  style="padding:6px 12px; font-size:13px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
+                  @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
+                  @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">记录</button>
+          <button @click="$emit('close')" 
+                  style="padding:6px 12px; font-size:13px; background:#fff; border:1px solid #ddd; color:#666; transition:all 0.2s;"
+                  @mouseenter="$event.target.style.backgroundColor='#e8e8e8'; $event.target.style.borderColor='#999'"
+                  @mouseleave="$event.target.style.backgroundColor='#fff'; $event.target.style.borderColor='#ddd'">关闭</button>
+        </div>
       </div>
       
       <!-- 主体内容 -->
@@ -213,6 +219,8 @@
           删除游戏
         </button>
       </div>
+      <!-- 记录编辑器：使用独立弹窗显示（由 NoteEditorModal 提供） -->
+      <NoteEditorModal :visible="noteEditorVisible" :note="noteObj" @close="noteEditorVisible = false" @saved="onNoteSaved" @deleted="onNoteDeleted" />
     </div>
   </div>
 </template>
@@ -220,6 +228,8 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import gameService from '../services/gameService';
+import NoteEditorModal from './NoteEditorModal.vue';
 
 const props = defineProps({
   visible: {
@@ -249,6 +259,8 @@ const emit = defineEmits(['close', 'launch-game', 'close-game', 'delete-game', '
 const showTagSelector = ref(false);
 const availableTags = ref([]);
 const newTagName = ref('');
+const noteEditorVisible = ref(false);
+const noteObj = ref(null);
 
 async function loadAvailableTags() {
   try {
@@ -344,6 +356,96 @@ onMounted(() => {
     loadAvailableTags();
   }
 });
+
+// Notes editor helpers
+async function openNotesEditor() {
+  if (!props.game) return;
+  noteEditorVisible.value = true;
+  // try to find an existing note for this game path
+  try {
+  const notes = await gameService.listNotes();
+  const gameId = String((props.detailData && props.detailData.id) || (props.game && props.game.id) || '');
+    const gameName = (props.detailData && (props.detailData.name_cn || props.detailData.name)) || (props.game && props.game.name) || '';
+    if (Array.isArray(notes)) {
+  const found = notes.find(n => String(n.game_id || '') === gameId);
+      if (found) {
+        noteObj.value = { ...found };
+        return;
+      }
+    }
+  } catch (e) {
+    console.error('加载记录失败:', e);
+  }
+  // new note
+  noteObj.value = {
+    id: '',
+    game_id: String((props.detailData && props.detailData.id) || (props.game && props.game.id) || ''),
+    game_name: String((props.detailData && (props.detailData.name_cn || props.detailData.name)) || (props.game && props.game.name) || ''),
+    title: '',
+    content: ''
+  };
+}
+
+async function saveNote() {
+  if (!noteObj.value) return;
+  // ensure game id/name present and normalize to strings before sending to backend
+  if (!noteObj.value.game_id) {
+    noteObj.value.game_id = String((props.detailData && props.detailData.id) || (props.game && props.game.id) || '');
+  } else {
+    noteObj.value.game_id = String(noteObj.value.game_id);
+  }
+  if (!noteObj.value.game_name) {
+    noteObj.value.game_name = String((props.detailData && (props.detailData.name_cn || props.detailData.name)) || (props.game && props.game.name) || '');
+  } else {
+    noteObj.value.game_name = String(noteObj.value.game_name);
+  }
+
+  try {
+    // normalize payload to ensure all fields expected as strings are strings
+    const payload = {
+      ...noteObj.value,
+      id: String(noteObj.value.id || ''),
+      game_id: String(noteObj.value.game_id || ''),
+      game_name: String(noteObj.value.game_name || ''),
+      title: String(noteObj.value.title || ''),
+      content: String(noteObj.value.content || ''),
+    };
+    const saved = await gameService.saveNote(payload);
+    // update local state with returned object (id, timestamps)
+    noteObj.value = { ...saved };
+    noteEditorVisible.value = false;
+    // emit a DOM event so other parts can optionally listen
+    try { window.dispatchEvent(new CustomEvent('notes-updated')); } catch (e) {}
+  } catch (e) {
+    alert('保存记录失败: ' + e);
+  }
+}
+
+async function deleteNote() {
+  if (!noteObj.value || !noteObj.value.id) return;
+  if (!confirm('确定要删除这条记录吗？')) return;
+  try {
+    if (noteObj.value.game_id && String(noteObj.value.game_id).trim() !== '') {
+      await gameService.deleteNote(noteObj.value.game_id);
+      noteObj.value = null;
+      noteEditorVisible.value = false;
+      try { window.dispatchEvent(new CustomEvent('notes-updated')); } catch (e) {}
+    }
+  } catch (e) {
+    alert('删除记录失败: ' + e);
+  }
+}
+
+function onNoteSaved(saved) {
+  // update local state and notify others
+  noteObj.value = { ...saved };
+  try { window.dispatchEvent(new CustomEvent('notes-updated')); } catch (e) {}
+}
+
+function onNoteDeleted(gameId) {
+  noteObj.value = null;
+  try { window.dispatchEvent(new CustomEvent('notes-updated')); } catch (e) {}
+}
 
 function getInfoboxValue(key) {
   if (!props.detailData?.infobox) return null;

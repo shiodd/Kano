@@ -10,7 +10,7 @@
       <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:24px;">
         <div style="display:grid; grid-template-columns:auto 1fr; gap:12px 16px; font-size:14px;">
           <div style="color:#666; font-weight:500;">版本:</div>
-          <div style="color:#333;">0.3.1</div>
+          <div style="color:#333;">0.3.5</div>
         </div>
       </div>
       

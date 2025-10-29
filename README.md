@@ -5,7 +5,7 @@
   
   一个轻量简洁的Galgame管理工具
   
-  ![Version](https://img.shields.io/badge/version-0.3.1-blue)
+  ![Version](https://img.shields.io/badge/version-0.3.5-blue)
   ![License](https://img.shields.io/badge/license-MIT-green)
   ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 </div>
@@ -23,18 +23,21 @@
 - 游戏详情
 - 游戏时长统计
 
-#### 游戏库界面
+#### v0.1.5游戏库界面
 ![游戏库](readme_image/game_library.png)
 
-#### 游戏详情
+#### v0.1.5游戏详情
 ![游戏详情](readme_image/game_info.png)
 
-#### 标签
+#### v0.2.0新增标签
 ![游戏详情](readme_image/library_tag.png)
 
 #### v0.2.0新增工具箱
 ![工具箱](readme_image/tools.png)
 
+#### v0.3.5新增记录
+![记录编辑](readme_image/notes_edit.png)
+![记录页面](readme_image/notes_view.png)
 
 ##  快速开始
 
@@ -77,7 +80,7 @@
 优先级大→小
 - [x] ~~游戏分类/标签功能~~
 - [x] ~~工具箱~~
-- [ ] 记录/感想
+- [x] ~~记录/感想~~
 - [ ] 云同步功能
 - [ ] Steam支持
 - [ ] 多语言支持

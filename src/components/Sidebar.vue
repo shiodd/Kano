@@ -39,6 +39,12 @@
         工具箱
       </button>
 
+  <button :class="{active: modelValue === 'notes'}" @click="$emit('update:modelValue', 'notes')" 
+      style="text-align:left; padding:10px 16px; font-size:14px; background:transparent; border:none; color:#666; cursor:pointer; transition:all 0.2s; border-left:2px solid transparent; width:100%; display:block;">
+    记录
+    <span style="float:right; font-size:12px; color:#999;">{{ notesCount }}</span>
+  </button>
+
       <div style="flex:1;"></div>
       
       <!-- 固定在底部的设置和关于按钮 -->
@@ -57,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 defineProps({
@@ -75,6 +81,7 @@ const emit = defineEmits(['update:modelValue', 'tag-selected', 'tags-updated']);
 
 const allTags = ref([]);
 const showTags = ref(false); // 默认折叠标签列表
+const notesCount = ref(0);
 
 function toggleLibrary() {
   // 总是切换到游戏库页面
@@ -139,8 +146,26 @@ async function loadTags() {
   }
 }
 
+async function loadNotesCount() {
+  try {
+    const notes = await invoke('list_notes');
+    if (Array.isArray(notes)) notesCount.value = notes.length;
+    else notesCount.value = 0;
+  } catch (error) {
+    console.error('加载记录数量失败:', error);
+    notesCount.value = 0;
+  }
+}
+
 onMounted(() => {
   loadTags();
+  loadNotesCount();
+  // refresh notes count when records change elsewhere
+  window.addEventListener('notes-updated', loadNotesCount);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('notes-updated', loadNotesCount);
 });
 
 defineExpose({

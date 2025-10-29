@@ -111,6 +111,30 @@ pub fn tools_path() -> PathBuf {
     p
 }
 
+pub fn notes_path() -> PathBuf {
+    let mut p = app_base_dir();
+    p.push("kano_data");
+    p.push("notes.json");
+
+    // migrate from old locations (app-local notes.json)
+    let mut old1 = app_base_dir();
+    old1.push("notes.json");
+    if old1.exists() && !p.exists() {
+        if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
+        let _ = fs::rename(&old1, &p);
+    }
+    let old_cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    if let Some(old_parent) = old_cwd.parent() {
+        let mut old2 = old_parent.to_path_buf();
+        old2.push("notes.json");
+        if old2.exists() && !p.exists() {
+            if let Some(parent) = p.parent() { let _ = fs::create_dir_all(parent); }
+            let _ = fs::rename(&old2, &p);
+        }
+    }
+    p
+}
+
 pub fn load_tools_file() -> Vec<ToolEntry> {
     let path = tools_path();
     if let Ok(s) = fs::read_to_string(&path) {

@@ -7,6 +7,7 @@ import Settings from './pages/Settings.vue';
 import About from './pages/About.vue';
 import TagManagement from './pages/TagManagement.vue';
 import Toolbox from './pages/Toolbox.vue';
+import Notes from './pages/Notes.vue';
 import Sidebar from './components/Sidebar.vue';
 import GameLibrary from './pages/GameLibrary.vue';
 import GameDetailModal from './components/GameDetailModal.vue';
@@ -794,6 +795,11 @@ async function handleTagsUpdated() {
         <!-- 工具箱页面 -->
         <div v-else-if="activeTab === 'toolbox'">
           <Toolbox />
+        </div>
+
+        <!-- 记录页面 -->
+        <div v-else-if="activeTab === 'notes'">
+          <Notes />
         </div>
 
       <!-- 关于页面 -->
